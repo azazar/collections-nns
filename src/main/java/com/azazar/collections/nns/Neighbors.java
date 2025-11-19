@@ -8,7 +8,7 @@ import java.util.List;
  * @author m
  * @param <X>
  */
-public interface Neighbors<X> {
+interface Neighbors<X> {
 
     X value();
     default double distance() {
