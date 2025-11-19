@@ -46,8 +46,38 @@ class ANNSetTest {
         Assertions.assertTrue((float)exactMatches / (float)dataset.length > 0.99f, "Nearest neighbour search should return the inserted element most of the time");
     }
 
+    @Test
+    void insertionCostPersistenceTest() {
+        int[] sizes = {1_000, 20_000, 200_000};
+        for (int size : sizes) {
+            BitSet[] dataset = createDataset(10, size);
+            CountingDistanceCalculator<BitSet> calculator = new CountingDistanceCalculator<>(BITSET_DISTANCE_CALC);
+            ANNSet<BitSet> set = createConfiguredSet(calculator);
+            System.out.println("Seeding set with " + size + " elements");
+            int inserted = 0;
+            for (BitSet value : dataset) {
+                Assertions.assertTrue(set.put(value), "Failed to insert seed value");
+                inserted++;
+                if (inserted % 10_000 == 0 || inserted == dataset.length) {
+                    System.out.println("Inserted " + inserted + " / " + dataset.length);
+                }
+            }
+            calculator.reset();
+            System.out.println("Performing probe insertion for set size " + size);
+            BitSet probe = mutatedCopy(dataset[size / 2]);
+            Assertions.assertTrue(set.put(probe), "Expected probe insertion for set size " + size);
+            Assertions.assertTrue(calculator.getCallCount() <= 5_000,
+                    () -> "Insertion exceeded distance budget for size " + size + ": " + calculator.getCallCount());
+            System.out.println("Distance calculations for set size " + size + ": " + calculator.getCallCount());
+        }
+    }
+
     private static ANNSet<BitSet> createConfiguredSet() {
-        ANNSet<BitSet> set = new ANNSet<>(BITSET_DISTANCE_CALC);
+        return createConfiguredSet(BITSET_DISTANCE_CALC);
+    }
+
+    private static <T> ANNSet<T> createConfiguredSet(DistanceCalculator<T> calculator) {
+        ANNSet<T> set = new ANNSet<>(calculator);
         set.setNeighbourhoodSize(30);
         set.setSearchSetSize(50);
         set.setSearchMaxSteps(-1);
@@ -81,6 +111,37 @@ class ANNSetTest {
             bits.set(i, RANDOM.nextBoolean());
         }
         return bits;
+    }
+
+    private static BitSet mutatedCopy(BitSet source) {
+        BitSet copy = (BitSet) source.clone();
+        copy.flip(0);
+        return copy;
+    }
+
+    private static final class CountingDistanceCalculator<T> implements DistanceCalculator<T> {
+
+        private final DistanceCalculator<T> delegate;
+
+        private int callCount = 0;
+
+        private CountingDistanceCalculator(DistanceCalculator<T> delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public double calcDistance(T o1, T o2) {
+            callCount++;
+            return delegate.calcDistance(o1, o2);
+        }
+
+        void reset() {
+            callCount = 0;
+        }
+
+        int getCallCount() {
+            return callCount;
+        }
     }
 
 }
