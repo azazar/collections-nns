@@ -211,13 +211,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         return a;
     }
 
-    public void dump() {
-        System.out.println("Dump");
-        for (IndexNode e : toArray()) {
-            System.out.println(e);
-        }
-    }
-
     private IndexNode entryPoint = null;
 
     @Override
