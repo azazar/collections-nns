@@ -7,7 +7,7 @@ import java.util.Random;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-class NNSTest {
+class ANNSetTest {
 
     private static final int BIT_LENGTH = 256;
     private static final Random RANDOM = new Random(0);
@@ -36,7 +36,7 @@ class NNSTest {
         int exactMatches = 0;
 
         for (BitSet entry : dataset) {
-            Neighbors<BitSet> result = set.findNearest(entry);
+            Neighbors<BitSet> result = set.findNeighbors(entry);
             Assertions.assertNotNull(result, "Expected a nearest result for every inserted value");
             if (result.value().equals(entry)) {
                 exactMatches++;
@@ -51,7 +51,7 @@ class NNSTest {
         set.setNeighbourhoodSize(30);
         set.setSearchSetSize(50);
         set.setSearchMaxSteps(-1);
-        set.setMaxResultStepsMultiplier(3f);
+        set.setAdaptiveStepFactor(3f);
         return set;
     }
 
