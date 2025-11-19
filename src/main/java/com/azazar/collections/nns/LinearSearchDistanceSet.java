@@ -1,13 +1,11 @@
 package com.azazar.collections.nns;
 
-import com.azazar.collections.nns.DistanceBasedSet.SearchResult;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.ThreadFactory;
 
 /**
  *
@@ -15,36 +13,31 @@ import java.util.concurrent.ThreadFactory;
  */
 public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
 
-    private static final boolean multithreaded;
-    private static final Executor executor;
+    private static final boolean MULTITHREADED;
+    private static final Executor EXECUTOR;
     static {
         if (Runtime.getRuntime().availableProcessors() >= 2) {
-            multithreaded = true;
-            executor = new ScheduledThreadPoolExecutor(Runtime.getRuntime().availableProcessors(), new ThreadFactory() {
-
-                public Thread newThread(Runnable r) {
-                    Thread rv = new Thread(r);
-                    rv.setDaemon(true);
-                    rv.setName("LinearSearchDistanceSet comparator thread");
-                    return rv;
-                }
+            MULTITHREADED = true;
+            EXECUTOR = new ScheduledThreadPoolExecutor(Runtime.getRuntime().availableProcessors(), r -> {
+                Thread rv = new Thread(r);
+                rv.setDaemon(true);
+                rv.setName("LinearSearchDistanceSet comparator thread");
+                return rv;
             });
         } else {
-            multithreaded = false;
-            executor = null;
+            MULTITHREADED = false;
+            EXECUTOR = null;
         }
     }
 
-    final Object tasksMon = new Object();
-    int searchTasksPending = 0;
-
     private class SearchTask implements Runnable {
 
-        X query;
-        int start, end;
-        CountDownLatch countDownLatch;
+        final X query;
+        final int start;
+        final int end;
+        final CountDownLatch countDownLatch;
 
-        public SearchTask(X query, int start, int end, CountDownLatch countDownLatch) {
+        SearchTask(X query, int start, int end, CountDownLatch countDownLatch) {
             this.query = query;
             this.start = start;
             this.end = end;
@@ -53,6 +46,7 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
 
         public volatile LinearSearchResult<X> searchResult = null;
 
+        @Override
         public void run() {
             try {
                 synchronized (this) {
@@ -69,15 +63,17 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
         super(distanceCalculator);
     }
 
-    List<X> values = null;
+    private List<X> values = null;
 
+    @Override
     public int size() {
         return values == null ? 0 : values.size();
     }
 
+    @Override
     public boolean put(X value) {
         if (values == null) {
-            values = new ArrayList<X>();
+            values = new ArrayList<>();
             return values.add(value);
         } else {
             if (!values.contains(value))
@@ -90,12 +86,10 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
     private static class LinearSearchResult<X> implements SearchResultWithDistance<X> {
         X value;
         double distance;
-        int index;
 
-        public LinearSearchResult(X value, double distance, int index) {
+        public LinearSearchResult(X value, double distance) {
             this.value = value;
             this.distance = distance;
-            this.index = index;
         }
 
         @Override
@@ -110,6 +104,7 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
 
     }
 
+    @Override
     public SearchResult<X> findNearest(X value) {
         if (values == null) return null;
         int sz = values.size();
@@ -118,12 +113,12 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
 
         stopSearch = false;
 
-        if (multithreaded && (sz > 512)) {
+        if (MULTITHREADED && (sz > 512)) {
             int nTasks = Runtime.getRuntime().availableProcessors();
-            SearchTask[] tasks = (SearchTask[]) Array.newInstance(SearchTask.class, nTasks);
+            List<SearchTask> tasks = new ArrayList<>(nTasks);
             int start,end=-1;
-            CountDownLatch countDownLatch = new CountDownLatch(tasks.length);
-            for (int i = 0; i < tasks.length; i++) {
+            CountDownLatch countDownLatch = new CountDownLatch(nTasks);
+            for (int i = 0; i < nTasks; i++) {
                 if (i == 0) {
                     start = 0;
                     end = sz / nTasks;
@@ -134,10 +129,11 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
                     start = end;
                     end = i * ((sz / nTasks) + 1);
                 }
-                tasks[i] = new SearchTask(value, start, end, countDownLatch);
-                executor.execute(tasks[i]);
+                SearchTask task = new SearchTask(value, start, end, countDownLatch);
+                tasks.add(task);
+                EXECUTOR.execute(task);
             }
-            LinearSearchResult bestResult = null;
+            LinearSearchResult<X> bestResult = null;
             try {
                 countDownLatch.await();
             } catch (InterruptedException ex) {
@@ -163,23 +159,21 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
         if (clearStopper) stopSearch = false;
         X best = null;
         double bestDist = Integer.MAX_VALUE, dist;
-        int bestIdx = -1;
         for (int i = start; i < end; i++) {
             X e = values.get(i);
             dist = distanceCalculator.calcDistance(e, value);
             if (dist == 0) {
                 stopSearch = true;
-                return new LinearSearchResult<X>(e, dist, i);
+                return new LinearSearchResult<>(e, dist);
             } else if (dist < bestDist) {
                 best = e;
                 bestDist = dist;
-                bestIdx = i;
             }
             if (stopSearch)
                 break;
         }
         if (best != null)
-            return new LinearSearchResult<X>(best, bestDist, bestIdx);
+            return new LinearSearchResult<>(best, bestDist);
         else
             return null;
     }
@@ -199,7 +193,12 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
         return false;
     }
 
+    @SuppressWarnings("unchecked")
     public X[] toArray() {
-        return (X[]) values.toArray();
+        if (values == null || values.isEmpty())
+            throw new IllegalStateException("Cannot create an array when the set is empty");
+        Class<?> componentType = values.get(0).getClass();
+        X[] target = (X[]) Array.newInstance(componentType, values.size());
+        return values.toArray(target);
     }
 }

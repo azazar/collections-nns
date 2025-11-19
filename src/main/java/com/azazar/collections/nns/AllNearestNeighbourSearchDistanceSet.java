@@ -1,9 +1,17 @@
 package com.azazar.collections.nns;
 
 import com.azazar.util.ExponentialAverage;
-import java.io.*;
+import java.io.PrintStream;
+import java.io.Serializable;
 import java.lang.reflect.Array;
-import java.util.*;
+import java.util.AbstractList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Objects;
+import java.util.TreeSet;
 
 /**
  *
@@ -78,21 +86,23 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
 
         @Override
         public int hashCode() {
-            return element.hashCode();
+            return Objects.hash(element);
         }
 
         @Override
-        @SuppressWarnings("EqualsWhichDoesntCheckParameterClass")
+        @SuppressWarnings("unchecked")
         public boolean equals(Object obj) {
-            //return this.getClass().isInstance(obj) ? element.equals(((Neighbour)obj).element) : false;
-            // Performance optimization
-            //try {
-                return element.equals(((Neighbour)obj).element);
-            //} catch (ClassCastException ex) {
-            //    return false;
-            //}
+            if (this == obj) {
+                return true;
+            }
+            if (obj == null || getClass() != obj.getClass()) {
+                return false;
+            }
+            Neighbour other = (Neighbour) obj;
+            return Objects.equals(element, other.element);
         }
 
+        @Override
         public int compareTo(Neighbour o) {
             return Double.compare(distance, o.distance);
         }
@@ -107,6 +117,7 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
     public class SetElement implements Serializable {
 
         @Override
+        @SuppressWarnings("unchecked")
         public boolean equals(Object obj) {
             if (obj == null) {
                 return false;
@@ -134,20 +145,24 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
         }
 
         public boolean newNeightbour(SetElement element, double distance) {
-            if (distance >= worstDistance && neighbours.length >= neighbourhoodSize)
+            if (neighbours != null && distance >= worstDistance && neighbours.length >= neighbourhoodSize) {
                 return false;
+            }
+
             if (neighbours == null) {
-                neighbours = (Neighbour[]) Array.newInstance(Neighbour.class, 1);
+                neighbours = newNeighbourArray(1);
                 neighbours[0] = new Neighbour(element, distance);
                 worstDistance = distance;
                 return true;
-            } else if (neighbours.length < neighbourhoodSize || distance < worstDistance) {
+            }
+
+            if (neighbours.length < neighbourhoodSize || distance < worstDistance) {
                 int insertIndex = 0;
                 int ns = neighbours.length;
                 while (insertIndex < ns && neighbours[insertIndex].distance < distance) insertIndex++;
                 if (insertIndex >= neighbourhoodSize)
                     return false;
-                Neighbour[] nn = (Neighbour[]) Array.newInstance(Neighbour.class, neighbours.length + 1);
+                Neighbour[] nn = newNeighbourArray(neighbours.length + 1);
                 System.arraycopy(neighbours, 0, nn, 0, insertIndex);
                 nn[insertIndex] = new Neighbour(element, distance);
                 System.arraycopy(neighbours, insertIndex, nn, insertIndex + 1, neighbours.length - insertIndex);
@@ -182,15 +197,16 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
 
     private int size = 0;
 
+    @Override
     public int size() {
         return size;
     }
 
     public SetElement[] toArray() {
         if (root == null)
-            return (SetElement[]) Array.newInstance(SetElement.class, 0);
-        HashSet<SetElement> seen = new HashSet<SetElement>();
-        LinkedList<SetElement> toVisit = new LinkedList<SetElement>();
+            return newSetElementArray(0);
+        HashSet<SetElement> seen = new HashSet<>();
+        LinkedList<SetElement> toVisit = new LinkedList<>();
         toVisit.add(root);
         seen.add(root);
         SetElement e;
@@ -201,7 +217,7 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
                     seen.add(ne.element);
                 }
         }
-        SetElement[] a = (SetElement[]) seen.toArray((SetElement[]) Array.newInstance(SetElement.class, 0));
+        SetElement[] a = seen.toArray(newSetElementArray(0));
 //        Arrays.sort(a, new Comparator<SetElement>() {
 //
 //            public int compare(SetElement o1, SetElement o2) {
@@ -223,6 +239,7 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
 
     private SetElement root = null;
 
+    @Override
     public boolean put(X value) {
         if (root == null) {
             root = new SetElement(value);
@@ -280,10 +297,10 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
         double worstDistance = Double.MAX_VALUE;
 
 //        HashSet<SetElement> visited = new HashSet(Math.max(size / 1000, 10));
-        HashMap<SetElement, Integer> visited = new HashMap((int)Math.max(10, Math.round(averageVisited.value * 2d)));
+        HashMap<SetElement, Integer> visited = new HashMap<>((int)Math.max(10, Math.round(averageVisited.value * 2d)));
 
         LinkedList<Neighbour> nearest = null;
-        TreeSet<Neighbour> toVisit = new TreeSet<Neighbour>();
+        TreeSet<Neighbour> toVisit = new TreeSet<>();
         toVisit.add(entry);
         Neighbour el;
         int step = 0;
@@ -297,7 +314,7 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
             visited.put(el.element, step);
 
             if (nearest == null) {
-                nearest = new LinkedList<Neighbour>();
+                nearest = new LinkedList<>();
                 nearest.add(el);
                 worstDistance = el.distance;
             } else if (nearest.size() < searchSetSize || el.distance < worstDistance) {
@@ -339,13 +356,14 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
         Integer steps = visited.get(nearestElement);
 //        if (steps == null)
 //            throw new NullPointerException("steps==null!");
-        if (steps.intValue() > maxResultStep) {
+        if (steps != null && steps > maxResultStep) {
             //System.out.println("steps updated: " + maxResultStep + "=>" + steps + " (+"+((float)(steps.intValue() - maxResultStep) / (float)maxResultStep)+")");
-            maxResultStep = steps.intValue();
+            maxResultStep = steps;
         }
         return new ANNSearchResult(nearestElement, nearestNeighbour.distance, nearest);
     }
 
+    @Override
     public SearchResult<X> findNearest(X value) {
         return findNearestInternal(value);
     }
@@ -372,6 +390,7 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
             return distance;
         }
 
+        @Override
         public Collection<X> similar() {
             return new AbstractList<X>() {
 
@@ -388,6 +407,16 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
 
         }
 
+    }
+
+    @SuppressWarnings("unchecked")
+    private Neighbour[] newNeighbourArray(int size) {
+        return (Neighbour[]) Array.newInstance(Neighbour.class, size);
+    }
+
+    @SuppressWarnings("unchecked")
+    private SetElement[] newSetElementArray(int size) {
+        return (SetElement[]) Array.newInstance(SetElement.class, size);
     }
 
 //    public void writeObject(java.io.ObjectOutputStream out) throws IOException {

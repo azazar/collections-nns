@@ -52,6 +52,7 @@ public abstract class AbstractDistanceBasedSet<X> implements DistanceBasedSet<X>
             this.distance = distance;
         }
 
+        @Override
         public double distance() {
             return distance;
         }
@@ -67,6 +68,7 @@ public abstract class AbstractDistanceBasedSet<X> implements DistanceBasedSet<X>
             this.similar = similar;
         }
 
+        @Override
         public Collection<X> similar() {
             return similar;
         }
