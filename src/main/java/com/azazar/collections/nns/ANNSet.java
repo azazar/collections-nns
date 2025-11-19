@@ -282,7 +282,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         toVisit.add(entry);
         NeighborEntry el;
         int step = 0;
-        int maxSteps = searchMaxSteps > 0 ? searchMaxSteps : Math.round(adaptiveStepFactor * (float)maxResultStep) + 1;
+        int maxSteps = searchMaxSteps > 0 ? searchMaxSteps : Math.round(adaptiveStepFactor * maxResultStep) + 1;
         while (step++ < maxSteps && (el = toVisit.pollFirst()) != null) {
             if (visited.containsKey(el.element))
                 continue;
@@ -306,9 +306,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
                     if (!visited.containsKey(elN.element)) {
                         NeighborEntry nn = new NeighborEntry(elN.element, distanceCalculator.calcDistance(value, elN.element.value));
                         if (nn.distance == 0d) {
-                            synchronized (visitedNodesEma) {
-                                visitedNodesEma.add(visited.size());
-                            }
+                            visitedNodesEma.add(visited.size());
                             return new ANNSearchResult(elN.element, elN.distance, nearest);
                         }
                         toVisit.add(nn);
@@ -317,9 +315,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             }
         }
 
-        synchronized (visitedNodesEma) {
-            visitedNodesEma.add(visited.size());
-        }
+        visitedNodesEma.add(visited.size());
 
         if (nearest == null)
             return null;
