@@ -17,12 +17,14 @@ import java.util.TreeSet;
  *
  * @author Mikhail Yevchenko <spam@azazar.com>
  */
-public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> implements Serializable {
+public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
     private static final long serialVersionUID = 28345792346L;
+    
+    private DistanceCalculator<X> distanceCalculator;
 
-    public AllNearestNeighbourSearchDistanceSet(DistanceCalculator<X> distanceCalculator) {
-        super(distanceCalculator);
+    public ANNSet(DistanceCalculator<X> distanceCalculator) {
+        this.distanceCalculator = distanceCalculator;
     }
 
 //    public int nextIndex = 0;
@@ -197,7 +199,6 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
 
     private int size = 0;
 
-    @Override
     public int size() {
         return size;
     }
@@ -239,7 +240,6 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
 
     private SetElement root = null;
 
-    @Override
     public boolean put(X value) {
         if (root == null) {
             root = new SetElement(value);
@@ -363,12 +363,11 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
         return new ANNSearchResult(nearestElement, nearestNeighbour.distance, nearest);
     }
 
-    @Override
-    public SearchResult<X> findNearest(X value) {
+    public Neighbors<X> findNearest(X value) {
         return findNearestInternal(value);
     }
 
-    public class ANNSearchResult implements SearchResultWithDistance<X>, SearchResultWithSimilar<X> {
+    public class ANNSearchResult implements Neighbors<X> {
 
         public final SetElement element;
         public final double distance;

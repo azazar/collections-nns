@@ -1,6 +1,5 @@
 package com.azazar.collections.nns;
 
-import com.azazar.collections.nns.DistanceBasedSet.SearchResult;
 
 import java.util.BitSet;
 import java.util.Random;
@@ -37,7 +36,7 @@ class NNSTest {
         int exactMatches = 0;
 
         for (BitSet entry : dataset) {
-            SearchResult<BitSet> result = set.findNearest(entry);
+            Neighbors<BitSet> result = set.findNearest(entry);
             Assertions.assertNotNull(result, "Expected a nearest result for every inserted value");
             if (result.value().equals(entry)) {
                 exactMatches++;
@@ -47,8 +46,8 @@ class NNSTest {
         Assertions.assertTrue((float)exactMatches / (float)dataset.length > 0.99f, "Nearest neighbour search should return the inserted element most of the time");
     }
 
-    private static AllNearestNeighbourSearchDistanceSet<BitSet> createConfiguredSet() {
-        AllNearestNeighbourSearchDistanceSet<BitSet> set = new AllNearestNeighbourSearchDistanceSet<>(BITSET_DISTANCE_CALC);
+    private static ANNSet<BitSet> createConfiguredSet() {
+        ANNSet<BitSet> set = new ANNSet<>(BITSET_DISTANCE_CALC);
         set.setNeighbourhoodSize(30);
         set.setSearchSetSize(50);
         set.setSearchMaxSteps(-1);
