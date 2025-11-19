@@ -14,38 +14,19 @@ public abstract class AbstractDistanceBasedSet<X> implements DistanceBasedSet<X>
         this.distanceCalculator = distanceCalculator;
     }
 
-    private static final DistanceCalculator DEFAULT_CALCULATOR = new DistanceCalculator() {
-
-        @Override
-        public int hashCode() {
-            return 35734;
-        }
-
-        public double calcDistance(Object o1, Object o2) {
-            return ((DistanceCalculable)o1).calcDistanceTo(o2);
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            return obj == this;
-        }
-    };
-
-    protected AbstractDistanceBasedSet() {
-        this.distanceCalculator = DEFAULT_CALCULATOR;
-    }
-
+    @Override
     public boolean remove(X value) {
         if (!contains(value))
             return false;
         throw new UnsupportedOperationException("Item removal is not implemented for " + getClass().toString());
     }
 
+    @Override
     public boolean contains(X value) {
         SearchResult<X> r = findNearest(value);
         if (r == null)
             return false;
-        return r instanceof SearchResultWithDistance ? ((SearchResultWithDistance)r).distance() == 0 : value.equals(r.value());
+        return r instanceof SearchResultWithDistance ? ((SearchResultWithDistance<X>)r).distance() == 0 : value.equals(r.value());
     }
 
     protected static class BasicSearchResult<X> implements SearchResult<X> {
@@ -56,6 +37,7 @@ public abstract class AbstractDistanceBasedSet<X> implements DistanceBasedSet<X>
             this.value = value;
         }
         
+        @Override
         public X value() {
             return value;
         }
@@ -102,10 +84,12 @@ public abstract class AbstractDistanceBasedSet<X> implements DistanceBasedSet<X>
             this.similar = similar;
         }
 
+        @Override
         public double distance() {
             return distance;
         }
     
+        @Override
         public Collection<X> similar() {
             return similar;
         }

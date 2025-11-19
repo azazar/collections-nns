@@ -5,6 +5,7 @@ import java.util.Collection;
 /**
  *
  * @author Mikhail Yevchenko <spam@azazar.com>
+ * @param <X>
  */
 public interface DistanceBasedSet<X> {
     public int size();

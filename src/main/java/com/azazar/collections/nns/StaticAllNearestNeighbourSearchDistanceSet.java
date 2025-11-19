@@ -19,9 +19,6 @@ public class StaticAllNearestNeighbourSearchDistanceSet<X> extends AbstractDista
 
     private LinearSearchDistanceSet<X> wrapped = new LinearSearchDistanceSet<X>(distanceCalculator);
 
-    public StaticAllNearestNeighbourSearchDistanceSet() {
-    }
-
     public StaticAllNearestNeighbourSearchDistanceSet(DistanceCalculator<X> distanceCalculator) {
         super(distanceCalculator);
     }

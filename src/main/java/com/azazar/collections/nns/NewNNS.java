@@ -9,10 +9,7 @@ import java.util.*;
  *
  * @author Mikhail Yevchenko <spam@azazar.com>
  */
-public class NewNNS<X> extends AbstractDistanceBasedSet<X> implements HackSerializable {
-
-    public NewNNS() {
-    }
+public class NewNNS<X> extends AbstractDistanceBasedSet<X> {
 
     public NewNNS(DistanceCalculator<X> distanceCalculator) {
         super(distanceCalculator);
@@ -327,77 +324,6 @@ public class NewNNS<X> extends AbstractDistanceBasedSet<X> implements HackSerial
     public void optimizeForRead() {
         for (Element element : elements)
             element.optimizeForRead();
-    }
-
-    public void store(ObjectOutputStream out, ValueWriter vw) throws IOException {
-        out.writeInt(1); // version
-        out.writeInt(distanceCalculator.hashCode());
-        out.writeInt(nextId);
-        out.writeInt(linearLimit);
-        out.writeInt(linearAddLimit);
-        out.writeInt(maxSteps);
-        out.writeInt(addStepsBonus);
-        out.writeInt(maxStepsUpdateBonus);
-        out.writeInt(neighbourhoodSize);
-        out.writeInt(elements.size());
-        for (Element element : elements) {
-            out.writeInt(element.id);
-            vw.write(out, element.value);
-            out.writeDouble(element.worstDistance);
-            out.writeInt(element.neighbours.size());
-            for (Neighbour neighbour : element.neighbours) {
-                out.writeInt(neighbour.element.id);
-                out.writeDouble(neighbour.distance);
-            }
-        }
-    }
-
-    public void load(ObjectInputStream in, ValueReader vr) throws IOException {
-        if (in.readInt() != 1)
-            throw new IOException("Invalid version");
-        if (in.readInt() != distanceCalculator.hashCode())
-            throw new IOException("Invalid distance calculator");
-        nextId = in.readInt();
-        linearLimit = in.readInt();
-        linearAddLimit = in.readInt();
-        maxSteps = in.readInt();
-        addStepsBonus = in.readInt();
-        maxStepsUpdateBonus = in.readInt();
-        neighbourhoodSize = in.readInt();
-        int nElem = in.readInt();
-        elements.clear();
-        while (elements.size() < nElem)
-            elements.add(new Element(null));
-        for(int id = 0; id < nElem; id++) {
-            if (in.readInt() != id)
-                throw new IOException("Wrong ID");
-            Element element = elements.get(id);
-            element.id = id;
-            element.value = (X) vr.read(in);
-            element.worstDistance = in.readDouble();
-
-//            Neighbour[] neighbours = (Neighbour[]) Array.newInstance(Neighbour.class, in.readInt());
-//            for(int n = 0; n < neighbours.length; n++) {
-//                int nId = in.readInt();
-//                double nDist = in.readDouble();
-//                neighbours[n] = new Neighbour(elements.get(nId), nDist);
-//            }
-//            element.neighbours = Arrays.asList(neighbours);
-            final int[] neighbourIDs = new int[in.readInt()];
-            final double[] neighbourDists = new double[neighbourIDs.length];
-            element.neighbours = new AbstractList<Neighbour>() {
-
-                @Override
-                public Neighbour get(int index) {
-                    return new Neighbour(elements.get(neighbourIDs[index]), neighbourDists[index]);
-                }
-
-                @Override
-                public int size() {
-                    return neighbourIDs.length;
-                }
-            };
-        }
     }
 
 }

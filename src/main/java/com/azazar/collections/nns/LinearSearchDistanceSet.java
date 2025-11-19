@@ -69,9 +69,6 @@ public class LinearSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> {
         super(distanceCalculator);
     }
 
-    public LinearSearchDistanceSet() {
-    }
-
     List<X> values = null;
 
     public int size() {

@@ -9,12 +9,9 @@ import java.util.*;
  *
  * @author Mikhail Yevchenko <spam@azazar.com>
  */
-public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> implements Serializable, HackSerializable {
+public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBasedSet<X> implements Serializable {
 
     private static final long serialVersionUID = 28345792346L;
-
-    public AllNearestNeighbourSearchDistanceSet() {
-    }
 
     public AllNearestNeighbourSearchDistanceSet(DistanceCalculator<X> distanceCalculator) {
         super(distanceCalculator);
@@ -187,73 +184,6 @@ public class AllNearestNeighbourSearchDistanceSet<X> extends AbstractDistanceBas
 
     public int size() {
         return size;
-    }
-
-    public void store(ObjectOutputStream out, ValueWriter vw) throws IOException {
-        SetElement[] elements = toArray();
-        HashMap<SetElement, Integer> elemToIndex = new HashMap();
-        for (int i = 0; i < elements.length; i++) {
-            elemToIndex.put(elements[i], i);
-        }
-        out.writeInt(elements.length);
-        for (int i = 0; i < elements.length; i++) {
-            SetElement e = elements[i];
-            vw.write(out, e.value);
-        }
-        for (int i = 0; i < elements.length; i++) {
-            SetElement e = elements[i];
-            out.writeDouble(e.worstDistance);
-            out.writeInt(e.neighbours.length);
-            for (int j = 0; j < e.neighbours.length; j++) {
-                Neighbour n = e.neighbours[j];
-                out.writeInt(elemToIndex.get(n.element));
-                out.writeDouble(n.distance);
-            }
-        }
-        out.writeInt(elemToIndex.get(root));
-        out.writeInt(maxResultStep);
-        out.writeInt(1); // version
-    }
-
-    public void load(ObjectInputStream in, ValueReader vr) throws IOException {
-        SetElement[] elements = (SetElement[]) Array.newInstance(SetElement.class, in.readInt());
-        HashMap<SetElement, Integer> elemToIndex = new HashMap();
-        System.out.println("Loading " + elements.length + " NNS Set Elements from " + in + " using " + vr + " ...");
-        long nextOut = System.currentTimeMillis() + 1000;
-        for (int i = 0; i < elements.length; i++) {
-            X value = (X) vr.read(in);
-            elements[i] = new SetElement(value);
-
-            elemToIndex.put(elements[i], i);
-            if (((i & 0xFF) == 0) && System.currentTimeMillis() >= nextOut) {
-                System.out.println("" + i + " elements loaded");
-                nextOut = System.currentTimeMillis() + 1000;
-            }
-        }
-        System.out.println("Loading NNS Set Index");
-        nextOut = System.currentTimeMillis() + 1000;
-        for (int i = 0; i < elements.length; i++) {
-            SetElement e = elements[i];
-            elements[i].worstDistance = in.readDouble();
-            e.neighbours = (Neighbour[]) Array.newInstance(Neighbour.class, in.readInt());
-            for (int j = 0; j < e.neighbours.length; j++) {
-                SetElement n = elements[in.readInt()];
-                double dist = in.readDouble();
-                e.neighbours[j] = new Neighbour(n, dist);
-            }
-            if (((i & 0xFF) == 0) && System.currentTimeMillis() >= nextOut) {
-                System.out.println("" + i + " elements loaded");
-                nextOut = System.currentTimeMillis() + 1000;
-            }
-        }
-        System.out.println("NNS Set Index Loaded");
-        root = elements[in.readInt()];
-        size = elements.length;
-        try {
-            maxResultStep = in.readInt();
-        } catch (EOFException ex) {
-            // old version
-        }
     }
 
     public SetElement[] toArray() {
