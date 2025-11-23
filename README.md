@@ -2,6 +2,10 @@
 
 Lightweight Java collections for approximate nearest-neighbor search. `ANNSet` indexes arbitrary objects through a pluggable `DistanceCalculator`, keeps a bounded neighborhood graph, and returns the closest stored value (plus similar candidates) in sub-linear time for large datasets.
 
+## Notes
+- Built for personal use; unless you lack better alternatives, consider other solutions first.
+- Results are not perfect and some known bugs remain unfixed (plus others we probably have not discovered yet).
+
 ## Highlights
 - Works with any data type by supplying a `DistanceCalculator<T>`.
 - Tunable search behaviour (`neighbourhoodSize`, `searchSetSize`, `searchMaxSteps`, `adaptiveStepFactor`).
