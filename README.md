@@ -47,3 +47,21 @@ System.out.println("Nearest value   : " + nearest.value());
 ```
 
 Run `mvn package` to produce the library JAR under `target/`.
+
+## Use via JitPack
+Add both snippets to your `pom.xml` to pull this library from JitPack:
+```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
+<!-- inside <dependencies> -->
+<dependency>
+    <groupId>com.github.azazar</groupId>
+    <artifactId>collections-nns</artifactId>
+    <version>master-SNAPSHOT</version>
+</dependency>
+```
