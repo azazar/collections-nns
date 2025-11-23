@@ -5,6 +5,7 @@ Lightweight Java collections for approximate nearest-neighbor search. `ANNSet` i
 ## Notes
 - Built for personal use; unless you lack better alternatives, consider other solutions first.
 - Results are not perfect and some known bugs remain unfixed (plus others we probably have not discovered yet).
+- Code is old and rough around the edges—still fast and good enough for my use case, so expect no cleanup work.
 
 ## Highlights
 - Works with any data type by supplying a `DistanceCalculator<T>`.
