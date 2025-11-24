@@ -30,7 +30,7 @@ class ANNSetTest {
         BitSet[] dataset = createDataset(10, 1000);
 
         for (BitSet entry : dataset) {
-            set.put(entry);
+            set.add(entry);
         }
         
         int exactMatches = 0;
@@ -56,7 +56,7 @@ class ANNSetTest {
             System.out.println("Seeding set with " + size + " elements");
             int inserted = 0;
             for (BitSet value : dataset) {
-                set.put(value);
+                set.add(value);
                 //Assertions.assertTrue(set.put(value), "Failed to insert seed value #" + inserted); // TODO : Investigate issue
                 inserted++;
                 if (inserted % 10_000 == 0 || inserted == dataset.length) {
@@ -66,7 +66,7 @@ class ANNSetTest {
             calculator.reset();
             System.out.println("Performing probe insertion for set size " + size);
             BitSet probe = mutatedCopy(dataset[size / 2]);
-            Assertions.assertTrue(set.put(probe), "Expected probe insertion for set size " + size);
+            Assertions.assertTrue(set.add(probe), "Expected probe insertion for set size " + size);
             Assertions.assertTrue(calculator.getCallCount() <= 5_000,
                     () -> "Insertion exceeded distance budget for size " + size + ": " + calculator.getCallCount());
             System.out.println("Distance calculations for set size " + size + ": " + calculator.getCallCount());

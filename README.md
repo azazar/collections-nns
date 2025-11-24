@@ -38,8 +38,8 @@ BitSet sample = BitSet.valueOf(new long[]{0b1011});
 BitSet variation = (BitSet) sample.clone();
 variation.flip(0);                       // ensure values differ – duplicates aren't stored
 
-set.put(sample);
-set.put(variation);
+set.add(sample);
+set.add(variation);
 
 Neighbors<BitSet> nearest = set.findNeighbors(sample);
 System.out.println("Nearest distance: " + nearest.distance());

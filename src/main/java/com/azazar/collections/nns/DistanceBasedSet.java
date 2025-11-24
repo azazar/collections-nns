@@ -8,7 +8,7 @@ package com.azazar.collections.nns;
 public interface DistanceBasedSet<X> {
     
     int size();
-    boolean put(X value);
+    boolean add(X value);
     Neighbors<X> findNeighbors(X value);
     
     default boolean contains(X value) {

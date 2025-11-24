@@ -214,7 +214,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     private IndexNode entryPoint = null;
 
     @Override
-    public boolean put(X value) {
+    public boolean add(X value) {
         if (entryPoint == null) {
             entryPoint = new IndexNode(value);
             elementCount = 1;
