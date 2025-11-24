@@ -25,6 +25,22 @@ class ANNSetTest {
     };
 
     @Test
+    void findNeighborsReturnsExistingNeighbors() {
+        DistanceBasedSet<BitSet> set = createConfiguredSet();
+        BitSet value = newItem();
+        BitSet closeNeighbor = mutatedCopy(value);
+        BitSet query = mutatedCopy(closeNeighbor);
+
+        Assertions.assertTrue(set.add(value), "Expected primary value to be inserted");
+        Assertions.assertTrue(set.add(closeNeighbor), "Expected close neighbor value to be inserted");
+
+        Neighbors<BitSet> neighbors = set.findNeighbors(query);
+        Assertions.assertNotNull(neighbors, "Expected neighbors result for existing value");
+        Assertions.assertTrue(set.contains(neighbors.value()), "Nearest neighbor should come from the set");
+        Assertions.assertFalse(neighbors.similar().isEmpty(), "Expected at least one similar neighbor to be returned");
+    }
+
+    @Test
     void nearestNeighbourSearchReturnsExactMatches() {
         DistanceBasedSet<BitSet> set = createConfiguredSet();
         BitSet[] dataset = createDataset(10, 1000);

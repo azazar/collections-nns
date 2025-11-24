@@ -174,8 +174,9 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         }
         
         // Check if exact match exists
-        if (nodes.containsKey(value)) {
-            return new NeighborsImpl<>(value, 0.0, Collections.emptyList());
+        Node<X> existing = nodes.get(value);
+        if (existing != null) {
+            return new NeighborsImpl<>(value, 0.0, new ArrayList<>(existing.neighbors));
         }
         
         List<Candidate<X>> nearest = searchKNearest(value, 1);
