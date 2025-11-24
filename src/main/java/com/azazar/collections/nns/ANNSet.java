@@ -4,17 +4,19 @@ import com.azazar.util.ExponentialAverage;
 import java.io.Serializable;
 import java.lang.reflect.Array;
 import java.util.AbstractList;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 
 /**
  *
  * @author Mikhail Yevchenko <spam@azazar.com>
+ * @param <X> Type of elements in the set
  */
 public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
@@ -184,40 +186,27 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
     }
 
-    private int elementCount = 0;
-
     @Override
     public int size() {
-        return elementCount;
+        return nodes.size();
     }
 
-    public IndexNode[] toArray() {
-        if (entryPoint == null)
-            return newIndexNodeArray(0);
-        HashSet<IndexNode> seen = new HashSet<>();
-        LinkedList<IndexNode> toVisit = new LinkedList<>();
-        toVisit.add(entryPoint);
-        seen.add(entryPoint);
-        IndexNode e;
-        while ((e = toVisit.poll()) != null) {
-            for (NeighborEntry ne : e.neighbours)
-                if (!seen.contains(ne.element)) {
-                    toVisit.add(ne.element);
-                    seen.add(ne.element);
-                }
-        }
-        IndexNode[] a = seen.toArray(newIndexNodeArray(0));
-
-        return a;
+    public List<IndexNode> toList() {
+        return nodes;
+    }
+    
+    public void forEach(Consumer<X> consumer) {
+        nodes.forEach(n -> consumer.accept(n.value));
     }
 
     private IndexNode entryPoint = null;
+    private final ArrayList<IndexNode> nodes = new ArrayList<>();
 
     @Override
     public boolean add(X value) {
         if (entryPoint == null) {
             entryPoint = new IndexNode(value);
-            elementCount = 1;
+            nodes.add(entryPoint);
             return true;
         } else {
             ANNSearchResult searchRes = findNearestInternal(value);
@@ -240,10 +229,13 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
                     if (nn >= neighbourhoodSize)
                         break;
                 }
-                if (nn > 0) {
-                    elementCount++;
+                if (nn == 0) {
+                    return false;
                 }
-                return nn > 0;
+
+                nodes.add(newEl);
+
+                return true;
             }
         }
     }
@@ -263,7 +255,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     private int maxResultStep = 1;
 
     public ANNSearchResult findNearestInternal(X value, NeighborEntry entry) {
-        if (elementCount == 0)
+        if (nodes.isEmpty())
             return null;
 
         double worstDistance = Double.MAX_VALUE;
@@ -372,11 +364,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     @SuppressWarnings("unchecked")
     private NeighborEntry[] newNeighbourArray(int size) {
         return (NeighborEntry[]) Array.newInstance(NeighborEntry.class, size);
-    }
-
-    @SuppressWarnings("unchecked")
-    private IndexNode[] newIndexNodeArray(int size) {
-        return (IndexNode[]) Array.newInstance(IndexNode.class, size);
     }
 
 }
