@@ -169,6 +169,11 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
     @Override
     public Neighbors<X> findNeighbors(X value) {
+        return findNeighbors(value, 1);
+    }
+
+    @Override
+    public Neighbors<X> findNeighbors(X value, int count) {
         if (nodes.isEmpty()) {
             return null;
         }
@@ -179,7 +184,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             return new NeighborsImpl<>(value, 0.0, new ArrayList<>(existing.neighbors));
         }
         
-        List<Candidate<X>> nearest = searchKNearest(value, 1);
+        List<Candidate<X>> nearest = searchKNearest(value, count);
         if (nearest.isEmpty()) {
             return null;
         }
@@ -188,9 +193,8 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         
         // Collect similar neighbors
         List<X> similar = new ArrayList<>();
-        List<Candidate<X>> kNearest = searchKNearest(value, Math.min(10, neighbourhoodSize));
-        for (int i = 1; i < kNearest.size(); i++) {
-            similar.add(kNearest.get(i).value);
+        for (int i = 1; i < nearest.size(); i++) {
+            similar.add(nearest.get(i).value);
         }
         
         return new NeighborsImpl<>(best.value, best.distance, similar);
