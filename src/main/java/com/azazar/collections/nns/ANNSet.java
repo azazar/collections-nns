@@ -168,12 +168,12 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     }
 
     @Override
-    public Neighbors<X> findNeighbors(X value) {
+    public ProximityResult<X> findNeighbors(X value) {
         return findNeighbors(value, 1);
     }
 
     @Override
-    public Neighbors<X> findNeighbors(X value, int count) {
+    public ProximityResult<X> findNeighbors(X value, int count) {
         if (nodes.isEmpty()) {
             return null;
         }
@@ -181,7 +181,15 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         // Check if exact match exists
         Node<X> existing = nodes.get(value);
         if (existing != null) {
-            return new NeighborsImpl<>(value, 0.0, new ArrayList<>(existing.neighbors));
+            // Build neighbor list with distances
+            List<DistancedValue<X>> nearestWithDistances = new ArrayList<>();
+            nearestWithDistances.add(new DistancedValueImpl<>(value, 0.0));
+            for (X neighbor : existing.neighbors) {
+                double dist = distanceCalculator.calcDistance(value, neighbor);
+                nearestWithDistances.add(new DistancedValueImpl<>(neighbor, dist));
+            }
+            nearestWithDistances.sort(Comparator.comparingDouble(DistancedValue::distance));
+            return new ProximityResultImpl<>(nearestWithDistances.subList(0, Math.min(count, nearestWithDistances.size())));
         }
         
         List<Candidate<X>> nearest = searchKNearest(value, count);
@@ -189,15 +197,13 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             return null;
         }
         
-        Candidate<X> best = nearest.get(0);
-        
-        // Collect similar neighbors
-        List<X> similar = new ArrayList<>();
-        for (int i = 1; i < nearest.size(); i++) {
-            similar.add(nearest.get(i).value);
+        // Convert candidates to DistancedValue list
+        List<DistancedValue<X>> nearestWithDistances = new ArrayList<>();
+        for (Candidate<X> candidate : nearest) {
+            nearestWithDistances.add(new DistancedValueImpl<>(candidate.value, candidate.distance));
         }
         
-        return new NeighborsImpl<>(best.value, best.distance, similar);
+        return new ProximityResultImpl<>(nearestWithDistances);
     }
 
     @Override
@@ -324,17 +330,15 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     }
 
     /**
-     * Implementation of Neighbors interface
+     * Implementation of DistancedValue interface
      */
-    private static class NeighborsImpl<X> implements Neighbors<X> {
+    private static class DistancedValueImpl<X> implements DistancedValue<X> {
         private final X value;
         private final double distance;
-        private final Collection<X> similar;
         
-        NeighborsImpl(X value, double distance, Collection<X> similar) {
+        DistancedValueImpl(X value, double distance) {
             this.value = value;
             this.distance = distance;
-            this.similar = similar;
         }
         
         @Override
@@ -346,10 +350,21 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         public double distance() {
             return distance;
         }
+    }
+
+    /**
+     * Implementation of ProximityResult interface
+     */
+    private static class ProximityResultImpl<X> implements ProximityResult<X> {
+        private final Collection<DistancedValue<X>> nearest;
+        
+        ProximityResultImpl(Collection<DistancedValue<X>> nearest) {
+            this.nearest = nearest;
+        }
         
         @Override
-        public Collection<X> similar() {
-            return similar;
+        public Collection<DistancedValue<X>> nearest() {
+            return nearest;
         }
     }
 }

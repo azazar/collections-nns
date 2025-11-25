@@ -10,11 +10,11 @@ public interface DistanceBasedSet<X> {
     int size();
     boolean add(X value);
     boolean remove(X value);
-    Neighbors<X> findNeighbors(X value);
-    Neighbors<X> findNeighbors(X value, int count);
+    ProximityResult<X> findNeighbors(X value);
+    ProximityResult<X> findNeighbors(X value, int count);
     
     default boolean contains(X value) {
-        Neighbors<X> r = findNeighbors(value);
+        ProximityResult<X> r = findNeighbors(value);
 
         if (r == null)
             return false;

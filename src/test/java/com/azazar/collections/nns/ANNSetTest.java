@@ -34,10 +34,10 @@ class ANNSetTest {
         Assertions.assertTrue(set.add(value), "Expected primary value to be inserted");
         Assertions.assertTrue(set.add(closeNeighbor), "Expected close neighbor value to be inserted");
 
-        Neighbors<BitSet> neighbors = set.findNeighbors(query);
+        ProximityResult<BitSet> neighbors = set.findNeighbors(query);
         Assertions.assertNotNull(neighbors, "Expected neighbors result for existing value");
-        Assertions.assertTrue(set.contains(neighbors.value()), "Nearest neighbor should come from the set");
-        Assertions.assertFalse(neighbors.similar().isEmpty(), "Expected at least one similar neighbor to be returned");
+        Assertions.assertTrue(set.contains(neighbors.closest()), "Nearest neighbor should come from the set");
+        Assertions.assertFalse(neighbors.nearest().isEmpty(), "Expected at least one similar neighbor to be returned");
     }
 
     @Test
@@ -52,9 +52,9 @@ class ANNSetTest {
         int exactMatches = 0;
 
         for (BitSet entry : dataset) {
-            Neighbors<BitSet> result = set.findNeighbors(entry);
+            ProximityResult<BitSet> result = set.findNeighbors(entry);
             Assertions.assertNotNull(result, "Expected a nearest result for every inserted value");
-            if (result.value().equals(entry)) {
+            if (result.closest().equals(entry)) {
                 exactMatches++;
             }
         }
@@ -173,21 +173,21 @@ class ANNSetTest {
         BitSet query = mutatedCopy(dataset[0]);
         
         // Test with count = 5
-        Neighbors<BitSet> neighbors5 = set.findNeighbors(query, 5);
+        ProximityResult<BitSet> neighbors5 = set.findNeighbors(query, 5);
         Assertions.assertNotNull(neighbors5, "Expected neighbors result for count=5");
-        Assertions.assertNotNull(neighbors5.value(), "Expected a nearest value");
-        // similar() should contain count-1 elements (the rest after the nearest)
-        Assertions.assertEquals(4, neighbors5.similar().size(), "Expected 4 similar neighbors for count=5");
+        Assertions.assertNotNull(neighbors5.closest(), "Expected a nearest value");
+        // nearest() now contains all results including the closest
+        Assertions.assertEquals(5, neighbors5.nearest().size(), "Expected 5 neighbors for count=5");
 
         // Test with count = 10
-        Neighbors<BitSet> neighbors10 = set.findNeighbors(query, 10);
+        ProximityResult<BitSet> neighbors10 = set.findNeighbors(query, 10);
         Assertions.assertNotNull(neighbors10, "Expected neighbors result for count=10");
-        Assertions.assertEquals(9, neighbors10.similar().size(), "Expected 9 similar neighbors for count=10");
+        Assertions.assertEquals(10, neighbors10.nearest().size(), "Expected 10 neighbors for count=10");
 
-        // Test with count = 1 (should behave like findNeighbors without count)
-        Neighbors<BitSet> neighbors1 = set.findNeighbors(query, 1);
+        // Test with count = 1 (should return only the closest)
+        ProximityResult<BitSet> neighbors1 = set.findNeighbors(query, 1);
         Assertions.assertNotNull(neighbors1, "Expected neighbors result for count=1");
-        Assertions.assertTrue(neighbors1.similar().isEmpty(), "Expected no similar neighbors for count=1");
+        Assertions.assertEquals(1, neighbors1.nearest().size(), "Expected 1 neighbor for count=1");
     }
 
     @Test
@@ -200,15 +200,14 @@ class ANNSetTest {
         }
 
         BitSet query = mutatedCopy(dataset[0]);
-        Neighbors<BitSet> neighbors = set.findNeighbors(query, 5);
+        ProximityResult<BitSet> neighbors = set.findNeighbors(query, 5);
         
         Assertions.assertNotNull(neighbors, "Expected neighbors result");
         
         // The nearest neighbor should be closer or equal to all similar neighbors
-        double nearestDistance = BITSET_DISTANCE_CALC.calcDistance(query, neighbors.value());
-        for (BitSet similar : neighbors.similar()) {
-            double similarDistance = BITSET_DISTANCE_CALC.calcDistance(query, similar);
-            Assertions.assertTrue(nearestDistance <= similarDistance,
+        double nearestDistance = neighbors.distance();
+        for (DistancedValue<BitSet> similar : neighbors.nearest()) {
+            Assertions.assertTrue(nearestDistance <= similar.distance(),
                     "Nearest neighbor should be closer than or equal to similar neighbors");
         }
     }
@@ -218,7 +217,7 @@ class ANNSetTest {
         DistanceBasedSet<BitSet> set = createConfiguredSet();
         
         BitSet query = newItem();
-        Neighbors<BitSet> neighbors = set.findNeighbors(query, 5);
+        ProximityResult<BitSet> neighbors = set.findNeighbors(query, 5);
         
         Assertions.assertNull(neighbors, "Expected null for empty set");
     }
@@ -234,11 +233,11 @@ class ANNSetTest {
 
         // Query with an exact element from the set
         BitSet exactMatch = dataset[25];
-        Neighbors<BitSet> neighbors = set.findNeighbors(exactMatch, 5);
+        ProximityResult<BitSet> neighbors = set.findNeighbors(exactMatch, 5);
         
         Assertions.assertNotNull(neighbors, "Expected neighbors result for exact match");
         Assertions.assertEquals(0.0, neighbors.distance(), "Expected zero distance for exact match");
-        Assertions.assertEquals(exactMatch, neighbors.value(), "Expected the exact element to be returned");
+        Assertions.assertEquals(exactMatch, neighbors.closest(), "Expected the exact element to be returned");
     }
 
 }
