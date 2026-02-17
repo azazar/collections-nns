@@ -274,12 +274,24 @@ class ANNSetTest {
         double recallKBaseline = 0.83;
         double distRatioBaseline = 1.55;
 
-        Assertions.assertTrue(recall1 >= recall1Baseline * 0.90,
-                "recall@1 regression: " + recall1 + " < " + (recall1Baseline * 0.90));
-        Assertions.assertTrue(recallK >= recallKBaseline * 0.90,
-                "recall@" + K + " regression: " + recallK + " < " + (recallKBaseline * 0.90));
-        Assertions.assertTrue(avgDistRatio <= distRatioBaseline * 1.10,
-                "distance ratio regression: " + avgDistRatio + " > " + (distRatioBaseline * 1.10));
+        // Regression guards (fail if quality drops)
+        Assertions.assertTrue(recall1 >= recall1Baseline * 0.95,
+                "recall@1 regression: " + recall1 + " < " + (recall1Baseline * 0.95) + " — update baseline if algorithm changed");
+        Assertions.assertTrue(recallK >= recallKBaseline * 0.95,
+                "recall@" + K + " regression: " + recallK + " < " + (recallKBaseline * 0.95) + " — update baseline if algorithm changed");
+        Assertions.assertTrue(avgDistRatio <= distRatioBaseline * 1.05,
+                "distance ratio regression: " + avgDistRatio + " > " + (distRatioBaseline * 1.05) + " — update baseline if algorithm changed");
+
+        // Improvement detectors (fail if quality improved significantly — update baselines!)
+        if (recall1 > recall1Baseline * 1.02) {
+            Assertions.fail("recall@1 IMPROVED: " + recall1 + " > " + recall1Baseline + " — UPDATE recall1Baseline to " + recall1);
+        }
+        if (recallK > recallKBaseline * 1.05) {
+            Assertions.fail("recall@" + K + " IMPROVED: " + recallK + " > " + recallKBaseline + " — UPDATE recallKBaseline to " + String.format("%.4f", recallK));
+        }
+        if (avgDistRatio < distRatioBaseline * 0.90) {
+            Assertions.fail("distance ratio IMPROVED: " + avgDistRatio + " < " + distRatioBaseline + " — UPDATE distRatioBaseline to " + String.format("%.4f", avgDistRatio));
+        }
     }
 
     @Test
@@ -347,17 +359,29 @@ class ANNSetTest {
         Assertions.assertTrue(perQueryK10 < maxPerQuery,
                 "Search k=10 is not sublinear: " + perQueryK10 + " calcs/query >= " + maxPerQuery + " (20% of " + SET_SIZE + ")");
 
-        // Assert against baselines with 10% margin
-        long buildBaseline = 12_600_000;
+        // Baselines
+        long buildBaseline = 3_685_000;
         long searchK1Baseline = 16_000;
-        long searchK10Baseline = 16_000;
+        long searchK10Baseline = 15_900;
 
-        Assertions.assertTrue(buildCost <= buildBaseline * 110 / 100,
-                "Build cost regression: " + buildCost + " exceeds baseline " + buildBaseline + " by more than 10%");
-        Assertions.assertTrue(searchCost1 <= searchK1Baseline * 110 / 100,
-                "Search k=1 cost regression: " + searchCost1 + " exceeds baseline " + searchK1Baseline + " by more than 10%");
-        Assertions.assertTrue(searchCost10 <= searchK10Baseline * 110 / 100,
-                "Search k=10 cost regression: " + searchCost10 + " exceeds baseline " + searchK10Baseline + " by more than 10%");
+        // Regression guards (fail if cost increases >5%)
+        Assertions.assertTrue(buildCost <= buildBaseline * 105 / 100,
+                "Build cost regression: " + buildCost + " exceeds baseline " + buildBaseline + " by more than 5%");
+        Assertions.assertTrue(searchCost1 <= searchK1Baseline * 105 / 100,
+                "Search k=1 cost regression: " + searchCost1 + " exceeds baseline " + searchK1Baseline + " by more than 5%");
+        Assertions.assertTrue(searchCost10 <= searchK10Baseline * 105 / 100,
+                "Search k=10 cost regression: " + searchCost10 + " exceeds baseline " + searchK10Baseline + " by more than 5%");
+
+        // Improvement detectors (fail if cost drops >15% — update baselines!)
+        if (buildCost < buildBaseline * 85 / 100) {
+            Assertions.fail("Build cost IMPROVED: " + buildCost + " < 85% of baseline " + buildBaseline + " — UPDATE buildBaseline to " + buildCost);
+        }
+        if (searchCost1 < searchK1Baseline * 85 / 100) {
+            Assertions.fail("Search k=1 IMPROVED: " + searchCost1 + " < 85% of baseline " + searchK1Baseline + " — UPDATE searchK1Baseline to " + searchCost1);
+        }
+        if (searchCost10 < searchK10Baseline * 85 / 100) {
+            Assertions.fail("Search k=10 IMPROVED: " + searchCost10 + " < 85% of baseline " + searchK10Baseline + " — UPDATE searchK10Baseline to " + searchCost10);
+        }
     }
 
     @Test
@@ -437,6 +461,58 @@ class ANNSetTest {
         Assertions.assertNotNull(neighbors, "Expected neighbors result for exact match");
         Assertions.assertEquals(0.0, neighbors.distance(), "Expected zero distance for exact match");
         Assertions.assertEquals(exactMatch, neighbors.closest(), "Expected the exact element to be returned");
+    }
+
+    @Test
+    void wallClockPerformanceTest() {
+        final int SET_SIZE = 10_000;
+        final int QUERY_COUNT = 1_000;
+
+        Random rng = new Random(77);
+        BitSet[] dataset = new BitSet[SET_SIZE];
+        for (int i = 0; i < SET_SIZE; i++) {
+            dataset[i] = new BitSet(BIT_LENGTH);
+            for (int bit = 0; bit < BIT_LENGTH; bit++) {
+                dataset[i].set(bit, rng.nextBoolean());
+            }
+        }
+        int clustering = 10;
+        for (int i = clustering; i < SET_SIZE; i++) {
+            BitSet cluster = dataset[rng.nextInt(clustering)];
+            for (int bit = 0; bit < BIT_LENGTH; bit++) {
+                if (rng.nextBoolean()) {
+                    dataset[i].set(bit, cluster.get(bit));
+                }
+            }
+        }
+
+        // Measure build time
+        ANNSet<BitSet> set = createConfiguredSet();
+        long buildStart = System.nanoTime();
+        for (BitSet value : dataset) {
+            set.add(value);
+        }
+        long buildMs = (System.nanoTime() - buildStart) / 1_000_000;
+        System.out.println("wallClockPerformanceTest: build " + SET_SIZE + " elements = " + buildMs + " ms");
+
+        // Measure query time
+        long queryStart = System.nanoTime();
+        for (int i = 0; i < QUERY_COUNT; i++) {
+            BitSet query = (BitSet) dataset[rng.nextInt(SET_SIZE)].clone();
+            query.flip(rng.nextInt(BIT_LENGTH));
+            set.findNeighbors(query, 10);
+        }
+        long queryMs = (System.nanoTime() - queryStart) / 1_000_000;
+        double queryUsEach = (double)(System.nanoTime() - queryStart) / 1000.0 / QUERY_COUNT;
+        System.out.println("wallClockPerformanceTest: " + QUERY_COUNT + " queries = " + queryMs + " ms (" + String.format("%.0f", queryUsEach) + " us/query)");
+
+        // Generous limits to avoid flaky failures on slow CI, but catch gross regressions
+        long maxBuildMs = 30_000; // 30 seconds for 10K build
+        long maxQueryMs = 5_000;  // 5 seconds for 1K queries
+        Assertions.assertTrue(buildMs < maxBuildMs,
+                "Build took " + buildMs + " ms, exceeds " + maxBuildMs + " ms limit");
+        Assertions.assertTrue(queryMs < maxQueryMs,
+                "Queries took " + queryMs + " ms, exceeds " + maxQueryMs + " ms limit");
     }
 
 }

@@ -26,11 +26,12 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     private static final int DEFAULT_SEARCH_MAX_STEPS = -1;
     private static final float DEFAULT_ADAPTIVE_STEP_FACTOR = 1.5f;
     private static final int DEFAULT_NUM_ENTRY_POINTS = -1;
-    private static final float DEFAULT_CONSTRUCTION_FACTOR = 20.0f;
+    private static final float DEFAULT_CONSTRUCTION_FACTOR = 5.0f;
 
     private final DistanceCalculator<X> distanceCalculator;
     private final Map<X, Node<X>> nodes;
     private final List<X> nodeList;
+    private final Map<X, Integer> nodeIndex; // for O(1) removal from nodeList
     
     private int neighbourhoodSize = DEFAULT_NEIGHBOURHOOD_SIZE;
     private int searchSetSize = DEFAULT_SEARCH_SET_SIZE;
@@ -51,10 +52,12 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
     private static class Candidate<X> implements Comparable<Candidate<X>> {
         final X value;
+        final Node<X> node; // cached node reference, may be null for query-only candidates
         final double distance;
         
-        Candidate(X value, double distance) {
+        Candidate(X value, Node<X> node, double distance) {
             this.value = value;
+            this.node = node;
             this.distance = distance;
         }
         
@@ -68,6 +71,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         this.distanceCalculator = distanceCalculator;
         this.nodes = new HashMap<>();
         this.nodeList = new ArrayList<>();
+        this.nodeIndex = new HashMap<>();
     }
 
     public void setNeighbourhoodSize(int neighbourhoodSize) {
@@ -112,6 +116,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
         if (nodes.isEmpty()) {
             nodes.put(value, newNode);
+            nodeIndex.put(value, nodeList.size());
             nodeList.add(value);
             return true;
         }
@@ -119,6 +124,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         int constructionLimit = (int) (searchSetSize * adaptiveStepFactor * constructionFactor);
         List<Candidate<X>> neighbors = searchKNearest(value, neighbourhoodSize, constructionLimit);
         nodes.put(value, newNode);
+        nodeIndex.put(value, nodeList.size());
         nodeList.add(value);
         
         for (Candidate<X> neighbor : neighbors) {
@@ -139,7 +145,17 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         if (node == null) {
             return false;
         }
-        nodeList.remove(value);
+        // O(1) removal from nodeList via swap-with-last
+        Integer idx = nodeIndex.remove(value);
+        if (idx != null) {
+            int lastIdx = nodeList.size() - 1;
+            if (idx != lastIdx) {
+                X lastValue = nodeList.get(lastIdx);
+                nodeList.set(idx, lastValue);
+                nodeIndex.put(lastValue, idx);
+            }
+            nodeList.remove(lastIdx);
+        }
         
         for (X neighbor : node.neighbors.keySet()) {
             Node<X> neighborNode = nodes.get(neighbor);
@@ -198,17 +214,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         return nodes.containsKey(value);
     }
 
-    private List<X> selectEntryPoints(int count, int offset) {
-        int n = Math.min(count, nodeList.size());
-        List<X> entries = new ArrayList<>(n);
-        if (n <= 0) return entries;
-        int step = Math.max(1, nodeList.size() / n);
-        for (int i = 0; i < n; i++) {
-            entries.add(nodeList.get(((i * step) + offset) % nodeList.size()));
-        }
-        return entries;
-    }
-
     private List<Candidate<X>> searchKNearest(X query, int k, int searchLimit) {
         if (nodes.isEmpty()) {
             return Collections.emptyList();
@@ -229,32 +234,47 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         PriorityQueue<Candidate<X>> candidates = new PriorityQueue<>(epCount + 1);
         PriorityQueue<Candidate<X>> results = new PriorityQueue<>(ef + 1, Collections.reverseOrder());
 
-        // Evaluate entry points (evenly-spaced)
-        List<X> entryPoints = selectEntryPoints(epCount, 0);
-        for (X ep : entryPoints) {
-            if (visited.add(ep)) {
-                double dist = distanceCalculator.calcDistance(query, ep);
-                Candidate<X> c = new Candidate<>(ep, dist);
-                candidates.add(c);
-                results.add(c);
-                if (results.size() > ef) results.poll();
+        // Evaluate entry points (evenly-spaced, inline to avoid allocation)
+        if (epCount > 0) {
+            int step = Math.max(1, n / epCount);
+            for (int i = 0; i < epCount; i++) {
+                X ep = nodeList.get((i * step) % n);
+                if (visited.add(ep)) {
+                    double dist = distanceCalculator.calcDistance(query, ep);
+                    Node<X> epNode = nodes.get(ep);
+                    Candidate<X> c = new Candidate<>(ep, epNode, dist);
+                    candidates.add(c);
+                    results.add(c);
+                    if (results.size() > ef) results.poll();
+                }
             }
         }
 
         int maxSteps = searchMaxSteps > 0 ? searchMaxSteps : Integer.MAX_VALUE;
         int steps = 0;
 
-        // Best-first graph traversal (no early termination)
+        // Best-first graph traversal with early termination
         while (!candidates.isEmpty() && visited.size() < searchLimit && steps < maxSteps) {
             Candidate<X> current = candidates.poll();
-            Node<X> currentNode = nodes.get(current.value);
+            
+            // Early termination: stop if best candidate is worse than worst result
+            if (results.size() >= ef && current.distance > results.peek().distance) {
+                break;
+            }
+            
+            Node<X> currentNode = current.node;
             if (currentNode == null) continue;
 
-            for (X neighbor : currentNode.neighbors.keySet()) {
+            for (Map.Entry<X, Double> entry : currentNode.neighbors.entrySet()) {
+                X neighbor = entry.getKey();
                 if (visited.add(neighbor)) {
                     double dist = distanceCalculator.calcDistance(query, neighbor);
-                    Candidate<X> nc = new Candidate<>(neighbor, dist);
-                    candidates.add(nc);
+                    Node<X> neighborNode = nodes.get(neighbor);
+                    Candidate<X> nc = new Candidate<>(neighbor, neighborNode, dist);
+                    // Only add to candidates if it could improve results
+                    if (results.size() < ef || dist < results.peek().distance) {
+                        candidates.add(nc);
+                    }
                     results.add(nc);
                     if (results.size() > ef) results.poll();
                 }
@@ -272,9 +292,9 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             return;
         }
         
-        List<Candidate<X>> neighborDistances = new ArrayList<>();
+        List<Candidate<X>> neighborDistances = new ArrayList<>(node.neighbors.size());
         for (Map.Entry<X, Double> entry : node.neighbors.entrySet()) {
-            neighborDistances.add(new Candidate<>(entry.getKey(), entry.getValue()));
+            neighborDistances.add(new Candidate<>(entry.getKey(), null, entry.getValue()));
         }
         neighborDistances.sort(Comparator.naturalOrder());
         
