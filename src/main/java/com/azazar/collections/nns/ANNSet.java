@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Approximate Nearest Neighbor Set implementation using a graph-based approach.
@@ -29,7 +28,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
     private final DistanceCalculator<X> distanceCalculator;
     private final Map<X, Node<X>> nodes;
-    private final List<X> entryPoints;
     
     private int neighbourhoodSize = DEFAULT_NEIGHBOURHOOD_SIZE;
     private int searchSetSize = DEFAULT_SEARCH_SET_SIZE;
@@ -70,7 +68,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     public ANNSet(DistanceCalculator<X> distanceCalculator) {
         this.distanceCalculator = distanceCalculator;
         this.nodes = new HashMap<>();
-        this.entryPoints = new ArrayList<>();
     }
 
     public void setNeighbourhoodSize(int neighbourhoodSize) {
@@ -108,8 +105,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         nodes.put(value, newNode);
         
         if (nodes.size() == 1) {
-            // First element becomes entry point
-            entryPoints.add(value);
             return true;
         }
         
@@ -128,11 +123,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             }
         }
         
-        // Occasionally add as entry point for better coverage
-        if (entryPoints.size() < 10 && ThreadLocalRandom.current().nextDouble() < 0.1) {
-            entryPoints.add(value);
-        }
-        
         return true;
     }
 
@@ -142,9 +132,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         if (node == null) {
             return false;
         }
-        
-        // Remove from entry points
-        entryPoints.remove(value);
         
         // Reconnect neighbors to maintain graph connectivity
         for (X neighbor : node.neighbors) {
@@ -223,30 +210,12 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         PriorityQueue<Candidate<X>> results = new PriorityQueue<>(Collections.reverseOrder());
         Set<X> visited = new HashSet<>();
         
-        // Start from entry points
-        for (X entry : entryPoints) {
-            if (entry != null && nodes.containsKey(entry)) {
-                double dist = distanceCalculator.calcDistance(query, entry);
-                candidates.add(new Candidate<>(entry, dist));
-                results.add(new Candidate<>(entry, dist));
-                visited.add(entry);
-            }
-        }
-        
-        // If no valid entry points, pick random nodes
-        if (candidates.isEmpty()) {
-            int samplesToTry = Math.min(5, nodes.size());
-            List<X> nodeList = new ArrayList<>(nodes.keySet());
-            for (int i = 0; i < samplesToTry; i++) {
-                X randomNode = nodeList.get(ThreadLocalRandom.current().nextInt(nodeList.size()));
-                if (!visited.contains(randomNode)) {
-                    double dist = distanceCalculator.calcDistance(query, randomNode);
-                    candidates.add(new Candidate<>(randomNode, dist));
-                    results.add(new Candidate<>(randomNode, dist));
-                    visited.add(randomNode);
-                }
-            }
-        }
+        // Start from an arbitrary node in the graph
+        X startNode = nodes.keySet().iterator().next();
+        double startDist = distanceCalculator.calcDistance(query, startNode);
+        candidates.add(new Candidate<>(startNode, startDist));
+        results.add(new Candidate<>(startNode, startDist));
+        visited.add(startNode);
         
         int steps = 0;
         int maxSteps = searchMaxSteps > 0 ? searchMaxSteps : nodes.size();
