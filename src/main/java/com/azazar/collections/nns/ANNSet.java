@@ -350,16 +350,11 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             if (nearestCandidates.size() > count) {
                 nearestCandidates.subList(count, nearestCandidates.size()).clear();
             }
-            @SuppressWarnings("unchecked")
-            List<DistancedValue<X>> result = (List<DistancedValue<X>>)(List<?>) nearestCandidates;
-            return new ProximityResultImpl<>(result);
+            return new ProximityResultImpl<>(nearestCandidates);
         }
         
         List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
-        
-        @SuppressWarnings("unchecked")
-        List<DistancedValue<X>> nearestWithDistances = (List<DistancedValue<X>>)(List<?>) new ArrayList<>(nearest);
-        return new ProximityResultImpl<>(nearestWithDistances);
+        return new ProximityResultImpl<>(nearest);
     }
 
     @Override
@@ -604,7 +599,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     private static class ProximityResultImpl<X> implements ProximityResult<X> {
         private final Collection<DistancedValue<X>> nearest;
         
-        ProximityResultImpl(Collection<DistancedValue<X>> nearest) {
+        ProximityResultImpl(Collection<? extends DistancedValue<X>> nearest) {
             this.nearest = Collections.unmodifiableCollection(nearest);
         }
         
