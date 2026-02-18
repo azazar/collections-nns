@@ -16,6 +16,23 @@ import java.util.Set;
  * Approximate Nearest Neighbor Set implementation using a graph-based approach.
  * Uses a navigable small-world graph structure for efficient approximate search.
  *
+ * <p><b>Thread safety:</b> This class is <em>not</em> thread-safe. All access to
+ * {@code add}, {@code remove}, {@code findNeighbors}, and {@code contains} must be
+ * externally synchronized if instances are shared across threads. Internal mutable
+ * state (the node graph, index structures, and pooled scratch collections) will
+ * produce data corruption or exceptions under concurrent mutation.</p>
+ *
+ * <p><b>Serialization:</b> Transient scratch collections used for search and pruning
+ * are lazily re-initialized after deserialization; no special handling is needed by
+ * callers.</p>
+ *
+ * <p><b>Tuning parameters:</b> Core parameters ({@code neighbourhoodSize},
+ * {@code searchSetSize}, etc.) should be set <em>before</em> inserting data.
+ * Changing them after the index is partially built will not retroactively adjust
+ * existing neighborhoods, so the graph will reflect a mix of old and new settings.
+ * All setters validate their inputs and throw {@link IllegalArgumentException} on
+ * out-of-range values.</p>
+ *
  * @author Mikhail Yevchenko <spam@azazar.com>
  * @param <X> Type of elements in the set
  */
@@ -39,6 +56,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     private final Map<X, Node<X>> nodes;
     private final List<X> nodeList;
     private final Map<X, Integer> nodeIndex; // for O(1) removal from nodeList
+    private final List<Node<X>> nodeNodes; // parallel to nodeList for O(1) entry-point node access
     
     private int neighbourhoodSize = DEFAULT_NEIGHBOURHOOD_SIZE;
     private int searchSetSize = DEFAULT_SEARCH_SET_SIZE;
@@ -91,33 +109,110 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         this.nodes = new HashMap<>();
         this.nodeList = new ArrayList<>();
         this.nodeIndex = new HashMap<>();
+        this.nodeNodes = new ArrayList<>();
     }
 
+    /**
+     * Sets the maximum number of neighbors each node maintains.
+     * Controls graph degree and directly affects build cost and search quality.
+     *
+     * <p>Should be set before inserting data; changing after build does not
+     * retroactively adjust existing neighborhoods.</p>
+     *
+     * @param neighbourhoodSize must be &ge; 1
+     * @throws IllegalArgumentException if {@code neighbourhoodSize < 1}
+     */
     public void setNeighbourhoodSize(int neighbourhoodSize) {
+        if (neighbourhoodSize < 1) {
+            throw new IllegalArgumentException("neighbourhoodSize must be >= 1, got " + neighbourhoodSize);
+        }
         this.neighbourhoodSize = neighbourhoodSize;
     }
 
+    /**
+     * Sets the beam width (ef) used during search. Larger values improve recall
+     * at the cost of more distance calculations.
+     *
+     * @param searchSetSize must be &ge; 1
+     * @throws IllegalArgumentException if {@code searchSetSize < 1}
+     */
     public void setSearchSetSize(int searchSetSize) {
+        if (searchSetSize < 1) {
+            throw new IllegalArgumentException("searchSetSize must be >= 1, got " + searchSetSize);
+        }
         this.searchSetSize = searchSetSize;
     }
 
+    /**
+     * Sets the maximum number of graph-walk steps per search.
+     * A value of {@code -1} means unlimited (bounded only by the search budget).
+     * A value of {@code 0} disables graph walking entirely (only entry points are
+     * evaluated), which is almost never useful.
+     *
+     * @param searchMaxSteps must be &ge; {@code -1}
+     * @throws IllegalArgumentException if {@code searchMaxSteps < -1}
+     */
     public void setSearchMaxSteps(int searchMaxSteps) {
+        if (searchMaxSteps < -1) {
+            throw new IllegalArgumentException("searchMaxSteps must be >= -1, got " + searchMaxSteps);
+        }
         this.searchMaxSteps = searchMaxSteps;
     }
 
+    /**
+     * Sets the factor applied to {@code searchSetSize} to compute the actual
+     * search budget.
+     *
+     * @param adaptiveStepFactor must be &gt; 0
+     * @throws IllegalArgumentException if {@code adaptiveStepFactor <= 0}
+     */
     public void setAdaptiveStepFactor(float adaptiveStepFactor) {
+        if (adaptiveStepFactor <= 0 || Float.isNaN(adaptiveStepFactor)) {
+            throw new IllegalArgumentException("adaptiveStepFactor must be > 0, got " + adaptiveStepFactor);
+        }
         this.adaptiveStepFactor = adaptiveStepFactor;
     }
 
+    /**
+     * Sets the number of entry points used at the start of each search.
+     * A value of {@code -1} uses an automatic heuristic (sqrt(n)).
+     *
+     * @param numEntryPoints must be &ge; {@code -1} and not {@code 0}
+     * @throws IllegalArgumentException if out of range
+     */
     public void setNumEntryPoints(int numEntryPoints) {
+        if (numEntryPoints < -1 || numEntryPoints == 0) {
+            throw new IllegalArgumentException("numEntryPoints must be -1 (auto) or >= 1, got " + numEntryPoints);
+        }
         this.numEntryPoints = numEntryPoints;
     }
 
+    /**
+     * Sets the multiplier on the search budget used during construction.
+     * Higher values explore more candidates when inserting, improving graph
+     * quality at the cost of slower builds.
+     *
+     * @param constructionFactor must be &ge; 1.0
+     * @throws IllegalArgumentException if {@code constructionFactor < 1.0}
+     */
     public void setConstructionFactor(float constructionFactor) {
+        if (constructionFactor < 1.0f || Float.isNaN(constructionFactor)) {
+            throw new IllegalArgumentException("constructionFactor must be >= 1.0, got " + constructionFactor);
+        }
         this.constructionFactor = constructionFactor;
     }
 
+    /**
+     * Sets the alpha parameter for RNG-style edge pruning.
+     * Values &gt; 1.0 keep more diverse (angular-spread) edges.
+     *
+     * @param pruningAlpha must be &gt; 0
+     * @throws IllegalArgumentException if {@code pruningAlpha <= 0}
+     */
     public void setPruningAlpha(float pruningAlpha) {
+        if (pruningAlpha <= 0 || Float.isNaN(pruningAlpha)) {
+            throw new IllegalArgumentException("pruningAlpha must be > 0, got " + pruningAlpha);
+        }
         this.pruningAlpha = pruningAlpha;
     }
 
@@ -141,6 +236,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             nodes.put(value, newNode);
             nodeIndex.put(value, nodeList.size());
             nodeList.add(value);
+            nodeNodes.add(newNode);
             return true;
         }
         
@@ -151,6 +247,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         nodes.put(value, newNode);
         nodeIndex.put(value, nodeList.size());
         nodeList.add(value);
+        nodeNodes.add(newNode);
         
         for (int i = 0; i < neighbors.size(); i++) {
             Candidate<X> neighbor = neighbors.get(i);
@@ -184,24 +281,37 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
                 X lastValue = nodeList.get(lastIdx);
                 nodeList.set(idx, lastValue);
                 nodeIndex.put(lastValue, idx);
+                nodeNodes.set(idx, nodeNodes.get(lastIdx));
             }
             nodeList.remove(lastIdx);
+            nodeNodes.remove(lastIdx);
         }
         
+        // Collect surviving neighbor nodes first to avoid ConcurrentModificationException-style issues.
+        List<Node<X>> survivingNeighborNodes = new ArrayList<>();
         for (X neighbor : node.neighbors.keySet()) {
             Node<X> neighborNode = nodes.get(neighbor);
             if (neighborNode != null) {
                 neighborNode.neighbors.remove(value);
-                for (X otherNeighbor : node.neighbors.keySet()) {
-                    if (!otherNeighbor.equals(neighbor) && nodes.containsKey(otherNeighbor)) {
-                        if (neighborNode.neighbors.size() < neighbourhoodSize) {
-                            double dist = distanceCalculator.calcDistance(neighbor, otherNeighbor);
-                            neighborNode.neighbors.put(otherNeighbor, dist);
-                            nodes.get(otherNeighbor).neighbors.put(neighbor, dist);
+                survivingNeighborNodes.add(neighborNode);
+            }
+        }
+        // Healing: reconnect surviving neighbors of the removed node.
+        for (Node<X> neighborNode : survivingNeighborNodes) {
+            for (X otherNeighbor : node.neighbors.keySet()) {
+                if (!otherNeighbor.equals(neighborNode.value) && nodes.containsKey(otherNeighbor)) {
+                    if (neighborNode.neighbors.size() < neighbourhoodSize) {
+                        double dist = distanceCalculator.calcDistance(neighborNode.value, otherNeighbor);
+                        neighborNode.neighbors.put(otherNeighbor, dist);
+                        Node<X> otherNode = nodes.get(otherNeighbor);
+                        if (otherNode != null) {
+                            otherNode.neighbors.put(neighborNode.value, dist);
                         }
                     }
                 }
             }
+            // Prune after healing to maintain bounded, diverse neighborhoods.
+            pruneNeighbors(neighborNode);
         }
         return true;
     }
@@ -214,7 +324,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     @Override
     public ProximityResult<X> findNeighbors(X value, int count) {
         if (nodes.isEmpty()) {
-            return null;
+            return new ProximityResultImpl<>(Collections.emptyList());
         }
         
         Node<X> existing = nodes.get(value);
@@ -234,9 +344,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         }
         
         List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
-        if (nearest.isEmpty()) {
-            return null;
-        }
         
         @SuppressWarnings("unchecked")
         List<DistancedValue<X>> nearestWithDistances = (List<DistancedValue<X>>)(List<?>) new ArrayList<>(nearest);
@@ -273,10 +380,17 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             // sqrt(n)*3/4->distRatio 2.54, *2/3->1.85, /2->2.71, cbrt(n)->recall 91.5%.
             epCount = Math.max(3, (int) Math.sqrt(n));
         }
-        epCount = Math.min(epCount, searchLimit / 6);
+        // Ensure at least 1 entry point is evaluated when the graph is non-empty,
+        // even if searchLimit is very small (e.g. < 6).
+        epCount = Math.min(epCount, Math.max(1, searchLimit / 6));
         epCount = Math.min(epCount, n);
 
         int ef = Math.max(k, searchSetSize);
+        // Tuning: IdentityHashMap is used for the visited set because each stored X
+        // value has a unique object identity within the graph (stored once in `nodes`).
+        // This avoids potentially expensive equals()/hashCode() calls on X during search.
+        // If X instances are shared or de-duplicated externally, identity semantics remain
+        // correct here because nodeList always references the canonical instances from `nodes`.
         if (reusableVisited == null) {
             reusableVisited = Collections.newSetFromMap(new IdentityHashMap<>(searchLimit * 2));
             reusableCandidatesPQ = new PriorityQueue<>();
@@ -291,14 +405,19 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         PriorityQueue<Candidate<X>> candidates = reusableCandidatesPQ;
         PriorityQueue<Candidate<X>> results = reusableResultsPQ;
 
+        // Tuning: cache field references in locals to eliminate this-pointer indirection in hot loops.
+        final DistanceCalculator<X> dc = this.distanceCalculator;
+        final Map<X, Node<X>> nodesMap = this.nodes;
+
         // Evaluate entry points (evenly-spaced, inline to avoid allocation)
         if (epCount > 0) {
             int step = Math.max(1, n / epCount);
             for (int i = 0; i < epCount; i++) {
-                X ep = nodeList.get((i * step) % n);
+                int epIdx = (i * step) % n;
+                Node<X> epNode = nodeNodes.get(epIdx);
+                X ep = epNode.value;
                 if (visited.add(ep)) {
-                    double dist = distanceCalculator.calcDistance(query, ep);
-                    Node<X> epNode = nodes.get(ep);
+                    double dist = dc.calcDistance(query, ep);
                     Candidate<X> c = new Candidate<>(ep, epNode, dist);
                     candidates.add(c);
                     results.add(c);
@@ -307,38 +426,44 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             }
         }
 
-        int maxSteps = searchMaxSteps > 0 ? searchMaxSteps : Integer.MAX_VALUE;
+        // -1 = unlimited (bounded only by searchLimit budget).
+        // 0  = no graph walking (only entry points are used).
+        // >0 = explicit step limit.
+        int maxSteps = searchMaxSteps < 0 ? Integer.MAX_VALUE : searchMaxSteps;
         int steps = 0;
+
+        // Tuning: cache worst-result distance to avoid repeated PQ.peek() calls in inner loop.
+        double worstDist = results.size() >= ef ? results.peek().distance : Double.MAX_VALUE;
 
         // Best-first graph traversal with early termination
         while (!candidates.isEmpty() && visited.size() < searchLimit && steps < maxSteps) {
             Candidate<X> current = candidates.poll();
             
             // Early termination: stop if best candidate is worse than worst result
-            if (results.size() >= ef && current.distance > results.peek().distance) {
+            if (current.distance > worstDist) {
                 break;
             }
             
             Node<X> currentNode = current.node;
             if (currentNode == null) continue;
 
-            for (Map.Entry<X, Double> entry : currentNode.neighbors.entrySet()) {
-                X neighbor = entry.getKey();
+            for (X neighbor : currentNode.neighbors.keySet()) {
                 if (visited.add(neighbor)) {
-                    double dist = distanceCalculator.calcDistance(query, neighbor);
+                    double dist = dc.calcDistance(query, neighbor);
                     // Tuning: Skip strictly worse neighbors -- avoids Candidate allocation, nodes.get(),
                     // and PQ operations for neighbors that would be added and immediately polled.
-                    if (results.size() >= ef && dist > results.peek().distance) {
+                    if (dist > worstDist) {
                         continue;
                     }
-                    Node<X> neighborNode = nodes.get(neighbor);
+                    Node<X> neighborNode = nodesMap.get(neighbor);
                     Candidate<X> nc = new Candidate<>(neighbor, neighborNode, dist);
                     // Only add to candidates if it could improve results
-                    if (results.size() < ef || dist < results.peek().distance) {
+                    if (dist < worstDist) {
                         candidates.add(nc);
                     }
                     results.add(nc);
                     if (results.size() > ef) results.poll();
+                    if (results.size() >= ef) worstDist = results.peek().distance;
                 }
             }
             steps++;
@@ -356,12 +481,11 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         for (int r = 0; r < Math.min(3, resultList.size()) && refineBudget > 0; r++) {
             Candidate<X> refCandidate = resultList.get(r);
             if (refCandidate.node == null) continue;
-            for (Map.Entry<X, Double> entry : refCandidate.node.neighbors.entrySet()) {
+            for (X neighbor : refCandidate.node.neighbors.keySet()) {
                 if (refineBudget <= 0) break;
-                X neighbor = entry.getKey();
                 if (visited.add(neighbor)) {
-                    double dist = distanceCalculator.calcDistance(query, neighbor);
-                    Candidate<X> nc = new Candidate<>(neighbor, nodes.get(neighbor), dist);
+                    double dist = dc.calcDistance(query, neighbor);
+                    Candidate<X> nc = new Candidate<>(neighbor, nodesMap.get(neighbor), dist);
                     resultList.add(nc);
                     refineBudget--;
                     refined = true;
@@ -382,6 +506,8 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         if (node.neighbors.size() <= neighbourhoodSize) {
             return;
         }
+        
+        final Map<X, Node<X>> nodesMap = this.nodes;
         
         // Tuning: Reuse containers and use Map.Entry (already exists in HashMap) instead of
         // allocating Candidate objects. Saves ~4.5M object allocations during a 5K-element build.
@@ -409,18 +535,17 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             // Tuning: checkLimit=10 is minimum for RNG pruning diversity.
             // Reducing to 8->distRatio 2.22, to 7->2.03.
             int checkLimit = Math.min(selected.size(), 10);
+            // Tuning: hoist candidateNode lookup outside inner loop; it's invariant per candidate.
+            Node<X> candidateNode = nodesMap.get(candidate.getKey());
             for (int i = 0; i < checkLimit; i++) {
                 Map.Entry<X, Double> existing = selected.get(i);
                 Double cachedDist = null;
-                Node<X> existingNode = nodes.get(existing.getKey());
+                Node<X> existingNode = nodesMap.get(existing.getKey());
                 if (existingNode != null) {
                     cachedDist = existingNode.neighbors.get(candidate.getKey());
                 }
-                if (cachedDist == null) {
-                    Node<X> candidateNode = nodes.get(candidate.getKey());
-                    if (candidateNode != null) {
-                        cachedDist = candidateNode.neighbors.get(existing.getKey());
-                    }
+                if (cachedDist == null && candidateNode != null) {
+                    cachedDist = candidateNode.neighbors.get(existing.getKey());
                 }
                 
                 double existingToCandidateDist;
@@ -456,7 +581,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         
         for (Map.Entry<X, Double> entry : sortedEntries) {
             if (!newNeighbors.containsKey(entry.getKey())) {
-                Node<X> neighborNode = nodes.get(entry.getKey());
+                Node<X> neighborNode = nodesMap.get(entry.getKey());
                 if (neighborNode != null) {
                     neighborNode.neighbors.remove(node.value);
                 }

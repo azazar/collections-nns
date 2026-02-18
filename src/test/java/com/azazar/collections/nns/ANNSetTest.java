@@ -467,13 +467,14 @@ class ANNSetTest {
     }
 
     @Test
-    void findNeighborsWithCountOnEmptySetReturnsNull() {
+    void findNeighborsWithCountOnEmptySetReturnsEmptyResult() {
         DistanceBasedSet<BitSet> set = createConfiguredSet();
         
         BitSet query = newItem();
         ProximityResult<BitSet> neighbors = set.findNeighbors(query, 5);
         
-        Assertions.assertNull(neighbors, "Expected null for empty set");
+        Assertions.assertNotNull(neighbors, "Expected non-null result even for empty set");
+        Assertions.assertTrue(neighbors.nearest().isEmpty(), "Expected empty nearest collection for empty set");
     }
 
     @Test
