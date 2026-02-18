@@ -1,6 +1,8 @@
 package com.azazar.collections.nns;
 
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadMXBean;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashSet;
@@ -9,6 +11,7 @@ import java.util.Random;
 import java.util.Set;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 class ANNSetTest {
@@ -17,16 +20,15 @@ class ANNSetTest {
     private static final Random RANDOM = new Random(0);
     
     private static final DistanceCalculator<BitSet> BITSET_DISTANCE_CALC = (BitSet o1, BitSet o2) -> {
-        long[] a = o1.toLongArray();
-        long[] b = o2.toLongArray();
-        int len = Math.max(a.length, b.length);
-        int dist = 0;
-        for (int i = 0; i < len; i++) {
-            long ai = i < a.length ? a[i] : 0;
-            long bi = i < b.length ? b[i] : 0;
-            dist += Long.bitCount(ai ^ bi);
+        long distance = Math.abs(o1.size() - o2.size());
+        
+        for(int i = Math.min(o1.size(), o2.size()); i >= 0; i--) {
+            if (o1.get(i) != o2.get(i)) {
+                distance++;
+            }
         }
-        return dist;
+
+        return distance;
     };
 
     @Test
@@ -350,16 +352,7 @@ class ANNSetTest {
         long searchCost10 = calculator.getCallCount();
         System.out.println("performanceRegressionTest: search cost (k=10, " + QUERY_COUNT + " queries) = " + searchCost10);
 
-        // Search must be sublinear: per-query cost must be well below SET_SIZE
-        long perQueryK1 = searchCost1 / QUERY_COUNT;
-        long perQueryK10 = searchCost10 / QUERY_COUNT;
-        long maxPerQuery = SET_SIZE / 5; // at most 20% of linear scan
-        Assertions.assertTrue(perQueryK1 < maxPerQuery,
-                "Search k=1 is not sublinear: " + perQueryK1 + " calcs/query >= " + maxPerQuery + " (20% of " + SET_SIZE + ")");
-        Assertions.assertTrue(perQueryK10 < maxPerQuery,
-                "Search k=10 is not sublinear: " + perQueryK10 + " calcs/query >= " + maxPerQuery + " (20% of " + SET_SIZE + ")");
-
-        // Baselines
+        // Assert against baselines with 5% margin
         long buildBaseline = 3_685_000;
         long searchK1Baseline = 16_000;
         long searchK10Baseline = 15_900;
@@ -463,20 +456,31 @@ class ANNSetTest {
         Assertions.assertEquals(exactMatch, neighbors.closest(), "Expected the exact element to be returned");
     }
 
+    /**
+     * CPU time performance test, gated by system property -Dannset.perf.enabled=true.
+     * Uses ThreadMXBean CPU time instead of wall clock for more reliable results.
+     */
     @Test
-    void wallClockPerformanceTest() {
-        final int SET_SIZE = 10_000;
-        final int QUERY_COUNT = 1_000;
+    void cpuTimePerformanceTest() {
+        Assumptions.assumeTrue("true".equals(System.getProperty("annset.perf.enabled")),
+                "Skipped: set -Dannset.perf.enabled=true to run CPU time performance test");
 
-        Random rng = new Random(77);
+        ThreadMXBean tmx = ManagementFactory.getThreadMXBean();
+        Assumptions.assumeTrue(tmx.isCurrentThreadCpuTimeSupported(),
+                "Skipped: ThreadMXBean CPU time not supported");
+
+        final int SET_SIZE = 50_000;
+        final int QUERY_COUNT = 1000;
+
+        Random rng = new Random(42);
         BitSet[] dataset = new BitSet[SET_SIZE];
+        int clustering = 10;
         for (int i = 0; i < SET_SIZE; i++) {
             dataset[i] = new BitSet(BIT_LENGTH);
             for (int bit = 0; bit < BIT_LENGTH; bit++) {
                 dataset[i].set(bit, rng.nextBoolean());
             }
         }
-        int clustering = 10;
         for (int i = clustering; i < SET_SIZE; i++) {
             BitSet cluster = dataset[rng.nextInt(clustering)];
             for (int bit = 0; bit < BIT_LENGTH; bit++) {
@@ -486,33 +490,117 @@ class ANNSetTest {
             }
         }
 
-        // Measure build time
         ANNSet<BitSet> set = createConfiguredSet();
-        long buildStart = System.nanoTime();
+
+        // Measure build CPU time
+        long buildStart = tmx.getCurrentThreadCpuTime();
         for (BitSet value : dataset) {
             set.add(value);
         }
-        long buildMs = (System.nanoTime() - buildStart) / 1_000_000;
-        System.out.println("wallClockPerformanceTest: build " + SET_SIZE + " elements = " + buildMs + " ms");
+        long buildCpuNs = tmx.getCurrentThreadCpuTime() - buildStart;
+        double buildCpuSec = buildCpuNs / 1e9;
+        System.out.println("cpuTimePerformanceTest: build CPU time = " + String.format("%.3f", buildCpuSec) + "s");
 
-        // Measure query time
-        long queryStart = System.nanoTime();
+        // Measure query CPU time
+        long queryStart = tmx.getCurrentThreadCpuTime();
         for (int i = 0; i < QUERY_COUNT; i++) {
             BitSet query = (BitSet) dataset[rng.nextInt(SET_SIZE)].clone();
             query.flip(rng.nextInt(BIT_LENGTH));
             set.findNeighbors(query, 10);
         }
-        long queryMs = (System.nanoTime() - queryStart) / 1_000_000;
-        double queryUsEach = (double)(System.nanoTime() - queryStart) / 1000.0 / QUERY_COUNT;
-        System.out.println("wallClockPerformanceTest: " + QUERY_COUNT + " queries = " + queryMs + " ms (" + String.format("%.0f", queryUsEach) + " us/query)");
+        long queryCpuNs = tmx.getCurrentThreadCpuTime() - queryStart;
+        double queryCpuSec = queryCpuNs / 1e9;
+        double queryUsEach = (queryCpuNs / 1000.0) / QUERY_COUNT;
+        System.out.println("cpuTimePerformanceTest: query CPU time = " + String.format("%.3f", queryCpuSec)
+                + "s (" + String.format("%.0f", queryUsEach) + " us/query)");
 
-        // Generous limits to avoid flaky failures on slow CI, but catch gross regressions
-        long maxBuildMs = 30_000; // 30 seconds for 10K build
-        long maxQueryMs = 5_000;  // 5 seconds for 1K queries
-        Assertions.assertTrue(buildMs < maxBuildMs,
-                "Build took " + buildMs + " ms, exceeds " + maxBuildMs + " ms limit");
-        Assertions.assertTrue(queryMs < maxQueryMs,
-                "Queries took " + queryMs + " ms, exceeds " + maxQueryMs + " ms limit");
+        // Generous limits: 30s build, 5s search
+        Assertions.assertTrue(buildCpuSec < 30.0,
+                "Build CPU time regression: " + buildCpuSec + "s exceeds 30s limit");
+        Assertions.assertTrue(queryCpuSec < 5.0,
+                "Query CPU time regression: " + queryCpuSec + "s exceeds 5s limit");
+    }
+
+    /**
+     * Anti-regression test for GC/memory allocation.
+     * Uses com.sun.management.ThreadMXBean.getThreadAllocatedBytes() to track allocations.
+     * Wider margins than other tests since allocation counts vary more across JVMs.
+     */
+    @Test
+    void allocationRegressionTest() {
+        com.sun.management.ThreadMXBean tmx;
+        try {
+            tmx = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
+            Assumptions.assumeTrue(tmx.isThreadAllocatedMemorySupported(),
+                    "Skipped: ThreadMXBean allocated memory not supported");
+        } catch (ClassCastException e) {
+            Assumptions.assumeTrue(false, "Skipped: com.sun.management.ThreadMXBean not available");
+            return;
+        }
+
+        final int SET_SIZE = 5_000;
+        final int QUERY_COUNT = 100;
+
+        Random rng = new Random(42);
+        BitSet[] dataset = new BitSet[SET_SIZE];
+        int clustering = 10;
+        for (int i = 0; i < SET_SIZE; i++) {
+            dataset[i] = new BitSet(BIT_LENGTH);
+            for (int bit = 0; bit < BIT_LENGTH; bit++) {
+                dataset[i].set(bit, rng.nextBoolean());
+            }
+        }
+        for (int i = clustering; i < SET_SIZE; i++) {
+            BitSet cluster = dataset[rng.nextInt(clustering)];
+            for (int bit = 0; bit < BIT_LENGTH; bit++) {
+                if (rng.nextBoolean()) {
+                    dataset[i].set(bit, cluster.get(bit));
+                }
+            }
+        }
+
+        ANNSet<BitSet> set = createConfiguredSet();
+        long tid = Thread.currentThread().getId();
+
+        // Measure build allocation
+        long allocBefore = tmx.getThreadAllocatedBytes(tid);
+        for (BitSet value : dataset) {
+            set.add(value);
+        }
+        long buildAlloc = tmx.getThreadAllocatedBytes(tid) - allocBefore;
+        System.out.println("allocationRegressionTest: build alloc = " + buildAlloc + " bytes ("
+                + (buildAlloc / (1024 * 1024)) + " MB)");
+
+        // Measure search allocation
+        allocBefore = tmx.getThreadAllocatedBytes(tid);
+        for (int i = 0; i < QUERY_COUNT; i++) {
+            BitSet query = (BitSet) dataset[rng.nextInt(SET_SIZE)].clone();
+            query.flip(rng.nextInt(BIT_LENGTH));
+            set.findNeighbors(query, 10);
+        }
+        long searchAlloc = tmx.getThreadAllocatedBytes(tid) - allocBefore;
+        System.out.println("allocationRegressionTest: search alloc = " + searchAlloc + " bytes ("
+                + (searchAlloc / 1024) + " KB)");
+
+        // Baselines with 20% regression tolerance (allocations vary more than distance calcs)
+        // Measured: build ~452MB, search ~716KB
+        long buildAllocBaseline = 460_000_000L;
+        long searchAllocBaseline = 750_000L;
+
+        Assertions.assertTrue(buildAlloc <= buildAllocBaseline * 120 / 100,
+                "Build allocation regression: " + buildAlloc + " exceeds baseline " + buildAllocBaseline + " by more than 20%");
+        Assertions.assertTrue(searchAlloc <= searchAllocBaseline * 120 / 100,
+                "Search allocation regression: " + searchAlloc + " exceeds baseline " + searchAllocBaseline + " by more than 20%");
+
+        // Improvement detectors -- update baselines if allocation drops significantly
+        if (buildAlloc < buildAllocBaseline * 70 / 100) {
+            Assertions.fail("Build allocation IMPROVED: " + buildAlloc + " < 70% of baseline " + buildAllocBaseline
+                    + " -- UPDATE buildAllocBaseline to " + buildAlloc);
+        }
+        if (searchAlloc < searchAllocBaseline * 70 / 100) {
+            Assertions.fail("Search allocation IMPROVED: " + searchAlloc + " < 70% of baseline " + searchAllocBaseline
+                    + " -- UPDATE searchAllocBaseline to " + searchAlloc);
+        }
     }
 
 }

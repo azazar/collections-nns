@@ -26,7 +26,10 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     private static final int DEFAULT_SEARCH_MAX_STEPS = -1;
     private static final float DEFAULT_ADAPTIVE_STEP_FACTOR = 1.5f;
     private static final int DEFAULT_NUM_ENTRY_POINTS = -1;
-    private static final float DEFAULT_CONSTRUCTION_FACTOR = 5.0f;
+    // Tuning: Was 20.0 -> 5.0 (3.4x build cost reduction) -> 4.0. Factor 4.0 equals 5.0 in quality
+    // because early termination fires before budget is exhausted; smaller value reduces memory pressure.
+    // Factor 3.5 degraded distRatio past threshold (1.68 vs limit 1.63). Factor 3.0 was both slower AND worse.
+    private static final float DEFAULT_CONSTRUCTION_FACTOR = 4.0f;
 
     private final DistanceCalculator<X> distanceCalculator;
     private final Map<X, Node<X>> nodes;
@@ -46,13 +49,18 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         
         Node(X value) {
             this.value = value;
+            // Tuning: Do NOT pre-size or replace with LinkedHashMap -- changing iteration order
+            // alters graph construction and produces measurably worse quality.
             this.neighbors = new HashMap<>();
         }
     }
 
     private static class Candidate<X> implements Comparable<Candidate<X>> {
         final X value;
-        final Node<X> node; // cached node reference, may be null for query-only candidates
+        // Tuning: cached node ref avoids HashMap lookup during search. However, using
+        // neighbor.node in add() caused a 2x wall-clock regression (likely JIT/cache-line effect),
+        // so the cached ref is only used in searchKNearest, not in add().
+        final Node<X> node; // may be null for query-only candidates
         final double distance;
         
         Candidate(X value, Node<X> node, double distance) {
@@ -132,6 +140,8 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             Node<X> neighborNode = nodes.get(neighbor.value);
             if (neighborNode != null) {
                 neighborNode.neighbors.put(value, neighbor.distance);
+                // Tuning: Lazy pruning (skip prune if size <= neighbourhoodSize + N) was tested
+                // but REJECTED: even +5 degrades distRatio from 1.50 to 2.67.
                 pruneNeighbors(neighborNode);
             }
         }
@@ -214,6 +224,10 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         return nodes.containsKey(value);
     }
 
+    // Tuning: Reuse visited set to reduce GC pressure from IdentityHashMap allocation.
+    // Marginal improvement (~1%) but safe -- no quality impact.
+    private transient Set<X> reusableVisited;
+
     private List<Candidate<X>> searchKNearest(X query, int k, int searchLimit) {
         if (nodes.isEmpty()) {
             return Collections.emptyList();
@@ -224,13 +238,20 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         if (numEntryPoints > 0) {
             epCount = numEntryPoints;
         } else {
+            // Tuning: sqrt(n) is critical. Any reduction degrades quality severely.
+            // sqrt(n)*3/4->distRatio 2.54, *2/3->1.85, /2->2.71, cbrt(n)->recall 91.5%.
             epCount = Math.max(3, (int) Math.sqrt(n));
         }
         epCount = Math.min(epCount, searchLimit / 4);
         epCount = Math.min(epCount, n);
 
         int ef = Math.max(k, searchSetSize);
-        Set<X> visited = Collections.newSetFromMap(new IdentityHashMap<>(searchLimit * 2));
+        if (reusableVisited == null) {
+            reusableVisited = Collections.newSetFromMap(new IdentityHashMap<>(searchLimit * 2));
+        } else {
+            reusableVisited.clear();
+        }
+        Set<X> visited = reusableVisited;
         PriorityQueue<Candidate<X>> candidates = new PriorityQueue<>(epCount + 1);
         PriorityQueue<Candidate<X>> results = new PriorityQueue<>(ef + 1, Collections.reverseOrder());
 
@@ -269,6 +290,11 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
                 X neighbor = entry.getKey();
                 if (visited.add(neighbor)) {
                     double dist = distanceCalculator.calcDistance(query, neighbor);
+                    // Tuning: Skip strictly worse neighbors -- avoids Candidate allocation, nodes.get(),
+                    // and PQ operations for neighbors that would be added and immediately polled.
+                    if (results.size() >= ef && dist > results.peek().distance) {
+                        continue;
+                    }
                     Node<X> neighborNode = nodes.get(neighbor);
                     Candidate<X> nc = new Candidate<>(neighbor, neighborNode, dist);
                     // Only add to candidates if it could improve results
@@ -301,12 +327,14 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         Map<X, Double> newNeighbors = new HashMap<>();
         List<Candidate<X>> selected = new ArrayList<>();
         int uncachedCalcs = 0;
-        int maxUncachedPerPruning = 30; // cap to control insertion cost
+        int maxUncachedPerPruning = 30; // Tuning: Do NOT reduce to 20 -- causes distRatio 1.49->1.69
         
         for (Candidate<X> candidate : neighborDistances) {
             if (newNeighbors.size() >= neighbourhoodSize) break;
             
             boolean keep = true;
+            // Tuning: checkLimit=10 is minimum for RNG pruning diversity.
+            // Reducing to 8->distRatio 2.22, to 7->2.03.
             int checkLimit = Math.min(selected.size(), 10);
             for (int i = 0; i < checkLimit; i++) {
                 Candidate<X> existing = selected.get(i);
