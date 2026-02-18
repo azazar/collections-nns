@@ -55,7 +55,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         }
     }
 
-    private static class Candidate<X> implements Comparable<Candidate<X>> {
+    private static class Candidate<X> implements Comparable<Candidate<X>>, DistancedValue<X> {
         final X value;
         // Tuning: cached node ref avoids HashMap lookup during search. However, using
         // neighbor.node in add() caused a 2x wall-clock regression (likely JIT/cache-line effect),
@@ -73,6 +73,12 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         public int compareTo(Candidate<X> o) {
             return Double.compare(this.distance, o.distance);
         }
+
+        @Override
+        public X value() { return value; }
+
+        @Override
+        public double distance() { return distance; }
     }
 
     public ANNSet(DistanceCalculator<X> distanceCalculator) {
@@ -198,13 +204,18 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         
         Node<X> existing = nodes.get(value);
         if (existing != null) {
-            List<DistancedValue<X>> nearestWithDistances = new ArrayList<>();
-            nearestWithDistances.add(new DistancedValueImpl<>(value, 0.0));
+            List<Candidate<X>> nearestCandidates = new ArrayList<>();
+            nearestCandidates.add(new Candidate<>(value, null, 0.0));
             for (Map.Entry<X, Double> entry : existing.neighbors.entrySet()) {
-                nearestWithDistances.add(new DistancedValueImpl<>(entry.getKey(), entry.getValue()));
+                nearestCandidates.add(new Candidate<>(entry.getKey(), null, entry.getValue()));
             }
-            nearestWithDistances.sort(Comparator.comparingDouble(DistancedValue::distance));
-            return new ProximityResultImpl<>(nearestWithDistances.subList(0, Math.min(count, nearestWithDistances.size())));
+            Collections.sort(nearestCandidates);
+            if (nearestCandidates.size() > count) {
+                nearestCandidates.subList(count, nearestCandidates.size()).clear();
+            }
+            @SuppressWarnings("unchecked")
+            List<DistancedValue<X>> result = (List<DistancedValue<X>>)(List<?>) nearestCandidates;
+            return new ProximityResultImpl<>(result);
         }
         
         List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
@@ -212,10 +223,8 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             return null;
         }
         
-        List<DistancedValue<X>> nearestWithDistances = new ArrayList<>();
-        for (Candidate<X> candidate : nearest) {
-            nearestWithDistances.add(new DistancedValueImpl<>(candidate.value, candidate.distance));
-        }
+        @SuppressWarnings("unchecked")
+        List<DistancedValue<X>> nearestWithDistances = (List<DistancedValue<X>>)(List<?>) new ArrayList<>(nearest);
         return new ProximityResultImpl<>(nearestWithDistances);
     }
 
@@ -224,9 +233,16 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         return nodes.containsKey(value);
     }
 
-    // Tuning: Reuse visited set to reduce GC pressure from IdentityHashMap allocation.
-    // Marginal improvement (~1%) but safe -- no quality impact.
+    // Tuning: Reuse collections across method calls to reduce GC pressure.
     private transient Set<X> reusableVisited;
+    private transient PriorityQueue<Candidate<X>> reusableCandidatesPQ;
+    private transient PriorityQueue<Candidate<X>> reusableResultsPQ;
+    private transient List<Candidate<X>> reusableResultList;
+    // Tuning: pruneNeighbors is called ~N*neighbourhoodSize times; reusing containers
+    // and using Map.Entry (already exists in HashMap) avoids millions of Candidate allocations.
+    private transient List<Map.Entry<X, Double>> reusablePruneEntries;
+    private transient List<Map.Entry<X, Double>> reusablePruneSelected;
+    private transient Map<X, Double> reusableNewNeighbors;
 
     private List<Candidate<X>> searchKNearest(X query, int k, int searchLimit) {
         if (nodes.isEmpty()) {
@@ -248,12 +264,17 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         int ef = Math.max(k, searchSetSize);
         if (reusableVisited == null) {
             reusableVisited = Collections.newSetFromMap(new IdentityHashMap<>(searchLimit * 2));
+            reusableCandidatesPQ = new PriorityQueue<>();
+            reusableResultsPQ = new PriorityQueue<>(Collections.reverseOrder());
+            reusableResultList = new ArrayList<>();
         } else {
             reusableVisited.clear();
+            reusableCandidatesPQ.clear();
+            reusableResultsPQ.clear();
         }
         Set<X> visited = reusableVisited;
-        PriorityQueue<Candidate<X>> candidates = new PriorityQueue<>(epCount + 1);
-        PriorityQueue<Candidate<X>> results = new PriorityQueue<>(ef + 1, Collections.reverseOrder());
+        PriorityQueue<Candidate<X>> candidates = reusableCandidatesPQ;
+        PriorityQueue<Candidate<X>> results = reusableResultsPQ;
 
         // Evaluate entry points (evenly-spaced, inline to avoid allocation)
         if (epCount > 0) {
@@ -308,9 +329,14 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             steps++;
         }
 
-        List<Candidate<X>> resultList = new ArrayList<>(results);
+        List<Candidate<X>> resultList = reusableResultList;
+        resultList.clear();
+        resultList.addAll(results);
         resultList.sort(Comparator.naturalOrder());
-        return resultList.subList(0, Math.min(k, resultList.size()));
+        if (resultList.size() > k) {
+            resultList.subList(k, resultList.size()).clear();
+        }
+        return resultList;
     }
 
     private void pruneNeighbors(Node<X> node) {
@@ -318,18 +344,26 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             return;
         }
         
-        List<Candidate<X>> neighborDistances = new ArrayList<>(node.neighbors.size());
-        for (Map.Entry<X, Double> entry : node.neighbors.entrySet()) {
-            neighborDistances.add(new Candidate<>(entry.getKey(), null, entry.getValue()));
+        // Tuning: Reuse containers and use Map.Entry (already exists in HashMap) instead of
+        // allocating Candidate objects. Saves ~4.5M object allocations during a 5K-element build.
+        if (reusablePruneEntries == null) {
+            reusablePruneEntries = new ArrayList<>();
+            reusablePruneSelected = new ArrayList<>();
+            reusableNewNeighbors = new HashMap<>();
         }
-        neighborDistances.sort(Comparator.naturalOrder());
+        List<Map.Entry<X, Double>> sortedEntries = reusablePruneEntries;
+        sortedEntries.clear();
+        sortedEntries.addAll(node.neighbors.entrySet());
+        sortedEntries.sort((a, b) -> Double.compare(a.getValue(), b.getValue()));
         
-        Map<X, Double> newNeighbors = new HashMap<>();
-        List<Candidate<X>> selected = new ArrayList<>();
+        Map<X, Double> newNeighbors = reusableNewNeighbors;
+        newNeighbors.clear();
+        List<Map.Entry<X, Double>> selected = reusablePruneSelected;
+        selected.clear();
         int uncachedCalcs = 0;
         int maxUncachedPerPruning = 30; // Tuning: Do NOT reduce to 20 -- causes distRatio 1.49->1.69
         
-        for (Candidate<X> candidate : neighborDistances) {
+        for (Map.Entry<X, Double> candidate : sortedEntries) {
             if (newNeighbors.size() >= neighbourhoodSize) break;
             
             boolean keep = true;
@@ -337,16 +371,16 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             // Reducing to 8->distRatio 2.22, to 7->2.03.
             int checkLimit = Math.min(selected.size(), 10);
             for (int i = 0; i < checkLimit; i++) {
-                Candidate<X> existing = selected.get(i);
+                Map.Entry<X, Double> existing = selected.get(i);
                 Double cachedDist = null;
-                Node<X> existingNode = nodes.get(existing.value);
+                Node<X> existingNode = nodes.get(existing.getKey());
                 if (existingNode != null) {
-                    cachedDist = existingNode.neighbors.get(candidate.value);
+                    cachedDist = existingNode.neighbors.get(candidate.getKey());
                 }
                 if (cachedDist == null) {
-                    Node<X> candidateNode = nodes.get(candidate.value);
+                    Node<X> candidateNode = nodes.get(candidate.getKey());
                     if (candidateNode != null) {
-                        cachedDist = candidateNode.neighbors.get(existing.value);
+                        cachedDist = candidateNode.neighbors.get(existing.getKey());
                     }
                 }
                 
@@ -354,36 +388,36 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
                 if (cachedDist != null) {
                     existingToCandidateDist = cachedDist;
                 } else if (uncachedCalcs < maxUncachedPerPruning) {
-                    existingToCandidateDist = distanceCalculator.calcDistance(existing.value, candidate.value);
+                    existingToCandidateDist = distanceCalculator.calcDistance(existing.getKey(), candidate.getKey());
                     uncachedCalcs++;
                 } else {
                     continue; // skip this check
                 }
                 
-                if (existingToCandidateDist < candidate.distance) {
+                if (existingToCandidateDist < candidate.getValue()) {
                     keep = false;
                     break;
                 }
             }
             
             if (keep) {
-                newNeighbors.put(candidate.value, candidate.distance);
+                newNeighbors.put(candidate.getKey(), candidate.getValue());
                 selected.add(candidate);
             }
         }
         
         if (newNeighbors.size() < neighbourhoodSize) {
-            for (Candidate<X> candidate : neighborDistances) {
+            for (Map.Entry<X, Double> candidate : sortedEntries) {
                 if (newNeighbors.size() >= neighbourhoodSize) break;
-                if (!newNeighbors.containsKey(candidate.value)) {
-                    newNeighbors.put(candidate.value, candidate.distance);
+                if (!newNeighbors.containsKey(candidate.getKey())) {
+                    newNeighbors.put(candidate.getKey(), candidate.getValue());
                 }
             }
         }
         
-        for (X neighbor : node.neighbors.keySet()) {
-            if (!newNeighbors.containsKey(neighbor)) {
-                Node<X> neighborNode = nodes.get(neighbor);
+        for (Map.Entry<X, Double> entry : sortedEntries) {
+            if (!newNeighbors.containsKey(entry.getKey())) {
+                Node<X> neighborNode = nodes.get(entry.getKey());
                 if (neighborNode != null) {
                     neighborNode.neighbors.remove(node.value);
                 }
@@ -392,22 +426,6 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         
         node.neighbors.clear();
         node.neighbors.putAll(newNeighbors);
-    }
-
-    private static class DistancedValueImpl<X> implements DistancedValue<X> {
-        private final X value;
-        private final double distance;
-        
-        DistancedValueImpl(X value, double distance) {
-            this.value = value;
-            this.distance = distance;
-        }
-        
-        @Override
-        public X value() { return value; }
-        
-        @Override
-        public double distance() { return distance; }
     }
 
     private static class ProximityResultImpl<X> implements ProximityResult<X> {

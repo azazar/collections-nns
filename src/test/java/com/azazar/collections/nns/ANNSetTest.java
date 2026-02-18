@@ -397,8 +397,8 @@ class ANNSetTest {
 
         // -- Allocation baselines --
         if (measureAlloc) {
-            long buildAllocBaseline = 460_000_000L;
-            long searchAllocBaseline = 750_000L;
+            long buildAllocBaseline = 231_000_000L;
+            long searchAllocBaseline = 490_000L;
 
             if (buildAlloc > buildAllocBaseline * 120 / 100)
                 failures.add("Build alloc regression: " + buildAlloc + " exceeds baseline " + buildAllocBaseline + " by >20%");
