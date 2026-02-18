@@ -347,9 +347,9 @@ class ANNSetTest {
         List<String> failures = new ArrayList<>();
 
         // -- Quality baselines --
-        double recall1Baseline = 0.935;
-        double recallKBaseline = 0.809;
-        double distRatioBaseline = 3.47;
+        double recall1Baseline = 0.96;
+        double recallKBaseline = 0.855;
+        double distRatioBaseline = 2.41;
 
         if (recall1 < recall1Baseline * 0.95)
             failures.add("recall@1 regression: " + recall1 + " < " + (recall1Baseline * 0.95));
@@ -365,9 +365,9 @@ class ANNSetTest {
             failures.add("distance ratio IMPROVED: " + avgDistRatio + " — UPDATE distRatioBaseline to " + String.format("%.4f", avgDistRatio));
 
         // -- Distance calc baselines --
-        long buildBaseline = 3_685_000;
-        long searchK1Baseline = 16_000;
-        long searchK10Baseline = 15_900;
+        long buildBaseline = 3_860_000;
+        long searchK1Baseline = 16_200;
+        long searchK10Baseline = 16_200;
 
         if (buildCost > buildBaseline * 105 / 100)
             failures.add("Build cost regression: " + buildCost + " exceeds baseline " + buildBaseline + " by >5%");
@@ -386,7 +386,7 @@ class ANNSetTest {
         if (measureCpuTime) {
             double buildCpuSec = buildCpuNs / 1e9;
             double searchCpuSec = searchCpuNs / 1e9;
-            double buildCpuBaseline = 6.0;
+            double buildCpuBaseline = 6.5;
             double searchCpuBaseline = 0.03;
 
             if (buildCpuSec > buildCpuBaseline)
@@ -397,7 +397,7 @@ class ANNSetTest {
 
         // -- Allocation baselines --
         if (measureAlloc) {
-            long buildAllocBaseline = 231_000_000L;
+            long buildAllocBaseline = 245_000_000L;
             long searchAllocBaseline = 490_000L;
 
             if (buildAlloc > buildAllocBaseline * 120 / 100)
