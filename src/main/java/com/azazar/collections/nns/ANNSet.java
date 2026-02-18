@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -37,6 +38,8 @@ import java.util.Set;
  * @param <X> Type of elements in the set
  */
 public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private static final int DEFAULT_NEIGHBOURHOOD_SIZE = 16;
     private static final int DEFAULT_SEARCH_SET_SIZE = 100;
@@ -67,6 +70,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     private float pruningAlpha = DEFAULT_PRUNING_ALPHA;
 
     private static class Node<X> implements Serializable {
+        private static final long serialVersionUID = 1L;
         final X value;
         final Map<X, Double> neighbors;
         
@@ -104,8 +108,18 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         public double distance() { return distance; }
     }
 
+    /**
+     * Creates a new ANNSet with the given distance calculator.
+     *
+     * <p><b>Serialization note:</b> both the {@code distanceCalculator} and the
+     * element type {@code X} must be {@link Serializable} for this index to
+     * serialize successfully.</p>
+     *
+     * @param distanceCalculator the distance function; must not be null
+     * @throws NullPointerException if {@code distanceCalculator} is null
+     */
     public ANNSet(DistanceCalculator<X> distanceCalculator) {
-        this.distanceCalculator = distanceCalculator;
+        this.distanceCalculator = Objects.requireNonNull(distanceCalculator, "distanceCalculator must not be null");
         this.nodes = new HashMap<>();
         this.nodeList = new ArrayList<>();
         this.nodeIndex = new HashMap<>();
@@ -146,8 +160,9 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     /**
      * Sets the maximum number of graph-walk steps per search.
      * A value of {@code -1} means unlimited (bounded only by the search budget).
-     * A value of {@code 0} disables graph walking entirely (only entry points are
-     * evaluated), which is almost never useful.
+     * A value of {@code 0} disables graph walking entirely: only entry points are
+     * evaluated and the refinement phase is skipped, so no neighbor expansion
+     * occurs at all.
      *
      * @param searchMaxSteps must be &ge; {@code -1}
      * @throws IllegalArgumentException if {@code searchMaxSteps < -1}
@@ -323,6 +338,9 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
     @Override
     public ProximityResult<X> findNeighbors(X value, int count) {
+        if (count < 1) {
+            throw new IllegalArgumentException("count must be >= 1, got " + count);
+        }
         if (nodes.isEmpty()) {
             return new ProximityResultImpl<>(Collections.emptyList());
         }
@@ -471,29 +489,32 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
 
         // Refinement: expand unvisited neighbors of the top results to escape
         // local minima caused by early termination or budget exhaustion.
+        // Skipped when searchMaxSteps == 0 to honor the "no graph walking" contract.
         List<Candidate<X>> resultList = reusableResultList;
         resultList.clear();
         resultList.addAll(results);
         resultList.sort(Comparator.naturalOrder());
 
-        int refineBudget = 10;
-        boolean refined = false;
-        for (int r = 0; r < Math.min(3, resultList.size()) && refineBudget > 0; r++) {
-            Candidate<X> refCandidate = resultList.get(r);
-            if (refCandidate.node == null) continue;
-            for (X neighbor : refCandidate.node.neighbors.keySet()) {
-                if (refineBudget <= 0) break;
-                if (visited.add(neighbor)) {
-                    double dist = dc.calcDistance(query, neighbor);
-                    Candidate<X> nc = new Candidate<>(neighbor, nodesMap.get(neighbor), dist);
-                    resultList.add(nc);
-                    refineBudget--;
-                    refined = true;
+        if (searchMaxSteps != 0) {
+            int refineBudget = 10;
+            boolean refined = false;
+            for (int r = 0; r < Math.min(3, resultList.size()) && refineBudget > 0; r++) {
+                Candidate<X> refCandidate = resultList.get(r);
+                if (refCandidate.node == null) continue;
+                for (X neighbor : refCandidate.node.neighbors.keySet()) {
+                    if (refineBudget <= 0) break;
+                    if (visited.add(neighbor)) {
+                        double dist = dc.calcDistance(query, neighbor);
+                        Candidate<X> nc = new Candidate<>(neighbor, nodesMap.get(neighbor), dist);
+                        resultList.add(nc);
+                        refineBudget--;
+                        refined = true;
+                    }
                 }
             }
-        }
-        if (refined) {
-            resultList.sort(Comparator.naturalOrder());
+            if (refined) {
+                resultList.sort(Comparator.naturalOrder());
+            }
         }
 
         if (resultList.size() > k) {
@@ -596,7 +617,9 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         private final Collection<DistancedValue<X>> nearest;
         
         ProximityResultImpl(Collection<DistancedValue<X>> nearest) {
-            this.nearest = nearest;
+            this.nearest = (nearest instanceof List)
+                    ? Collections.unmodifiableList((List<DistancedValue<X>>) nearest)
+                    : Collections.unmodifiableCollection(nearest);
         }
         
         @Override
