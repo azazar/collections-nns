@@ -82,8 +82,7 @@ class ANNSetTest {
             System.out.println("Seeding set with " + size + " elements");
             int inserted = 0;
             for (BitSet value : dataset) {
-                set.add(value);
-                //Assertions.assertTrue(set.put(value), "Failed to insert seed value #" + inserted); // TODO : Investigate issue
+                Assertions.assertTrue(set.add(value), "Failed to insert seed value #" + inserted);
                 inserted++;
                 if (inserted % 10_000 == 0 || inserted == dataset.length) {
                     System.out.println("Inserted " + inserted + " / " + dataset.length);
