@@ -265,7 +265,10 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         for (int i = 0; i < neighbors.size(); i++) {
             Candidate<X> neighbor = neighbors.get(i);
             newNode.neighbors.put(neighbor.value, neighbor.distance);
-            Node<X> neighborNode = nodes.get(neighbor.value);
+            Node<X> neighborNode = neighbor.node;
+            if (neighborNode == null) {
+                neighborNode = nodes.get(neighbor.value);
+            }
             if (neighborNode != null) {
                 neighborNode.neighbors.put(value, neighbor.distance);
                 // Only prune the core neighbors; extras are pruned naturally later.
@@ -371,6 +374,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
     // and using Map.Entry (already exists in HashMap) avoids millions of Candidate allocations.
     private transient List<Map.Entry<X, Double>> reusablePruneEntries;
     private transient List<Map.Entry<X, Double>> reusablePruneSelected;
+    private transient List<Node<X>> reusablePruneSelectedNodes;
     private transient Map<X, Double> reusableNewNeighbors;
 
     private List<Candidate<X>> searchKNearest(X query, int k, int searchLimit) {
@@ -518,6 +522,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         if (reusablePruneEntries == null) {
             reusablePruneEntries = new ArrayList<>();
             reusablePruneSelected = new ArrayList<>();
+            reusablePruneSelectedNodes = new ArrayList<>();
             reusableNewNeighbors = new HashMap<>();
         }
         List<Map.Entry<X, Double>> sortedEntries = reusablePruneEntries;
@@ -529,6 +534,8 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         newNeighbors.clear();
         List<Map.Entry<X, Double>> selected = reusablePruneSelected;
         selected.clear();
+        List<Node<X>> selectedNodes = reusablePruneSelectedNodes;
+        selectedNodes.clear();
         int uncachedCalcs = 0;
         int maxUncachedPerPruning = 30; // Tuning: Do NOT reduce to 20 -- causes distRatio 1.49->1.69
         
@@ -544,7 +551,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             for (int i = 0; i < checkLimit; i++) {
                 Map.Entry<X, Double> existing = selected.get(i);
                 Double cachedDist = null;
-                Node<X> existingNode = nodesMap.get(existing.getKey());
+                Node<X> existingNode = selectedNodes.get(i);
                 if (existingNode != null) {
                     cachedDist = existingNode.neighbors.get(candidate.getKey());
                 }
@@ -571,6 +578,7 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             if (keep) {
                 newNeighbors.put(candidate.getKey(), candidate.getValue());
                 selected.add(candidate);
+                selectedNodes.add(candidateNode);
             }
         }
         
