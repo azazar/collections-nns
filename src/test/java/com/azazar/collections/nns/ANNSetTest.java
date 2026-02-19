@@ -347,7 +347,7 @@ class ANNSetTest {
 
         // -- Quality baselines --
         double recall1Baseline = 0.96;
-        double recallKBaseline = 0.855;
+        double recallKBaseline = 0.861;
         double distRatioBaseline = 2.41;
 
         if (recall1 < recall1Baseline * 0.95)
@@ -365,8 +365,8 @@ class ANNSetTest {
 
         // -- Distance calc baselines --
         long buildBaseline = 3_860_000;
-        long searchK1Baseline = 16_200;
-        long searchK10Baseline = 16_200;
+        long searchK1Baseline = 16_900;
+        long searchK10Baseline = 17_000;
 
         if (buildCost > buildBaseline * 105 / 100)
             failures.add("Build cost regression: " + buildCost + " exceeds baseline " + buildBaseline + " by >5%");

@@ -477,15 +477,17 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         // Refinement: expand unvisited neighbors of the top results to escape
         // local minima caused by early termination or budget exhaustion.
         // Skipped when searchMaxSteps == 0 to honor the "no graph walking" contract.
+        // Tuning: budget=14 and top-5 gives the best recall@K improvement within the
+        // search-cost budget; top-3 with budget=10 was too shallow for k>1 queries.
         List<Candidate<X>> resultList = reusableResultList;
         resultList.clear();
         resultList.addAll(results);
         resultList.sort(Comparator.naturalOrder());
 
         if (searchMaxSteps != 0) {
-            int refineBudget = 10;
+            int refineBudget = 14;
             boolean refined = false;
-            for (int r = 0; r < Math.min(3, resultList.size()) && refineBudget > 0; r++) {
+            for (int r = 0; r < Math.min(5, resultList.size()) && refineBudget > 0; r++) {
                 Candidate<X> refCandidate = resultList.get(r);
                 if (refCandidate.node == null) continue;
                 for (X neighbor : refCandidate.node.neighbors.keySet()) {
