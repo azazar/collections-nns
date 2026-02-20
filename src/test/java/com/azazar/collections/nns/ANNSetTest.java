@@ -93,7 +93,7 @@ class ANNSetTest {
                 Assertions.assertTrue(calculator.getCallCount() <= 5_000,
                         () -> "Insertion exceeded distance budget for size " + size + ": " + calculator.getCallCount());
                 System.out.println("Distance calculations for set size " + size + ": " + calculator.getCallCount());
-                set.remove(probe);
+                Assertions.assertTrue(set.remove(probe), "Expected probe removal for set size " + size);
             }
         }
     }
