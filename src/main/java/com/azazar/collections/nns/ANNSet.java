@@ -234,6 +234,15 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         return nodes.size();
     }
 
+    /**
+     * Returns the stored graph neighbours and their distances for the given value,
+     * or an empty map if the value is not indexed. Package-private for testing.
+     */
+    Map<X, Double> getStoredNeighbors(X value) {
+        Node<X> node = nodes.get(value);
+        return node == null ? Collections.emptyMap() : Collections.unmodifiableMap(node.neighbors);
+    }
+
     private void indexNode(X value, Node<X> node) {
         nodes.put(value, node);
         nodeIndex.put(value, nodeNodes.size());
