@@ -112,18 +112,18 @@ class ANNSetTest {
         return set;
     }
 
-    private static BitSet[] createDataset(int clustering, int setSize) {
+    private static BitSet[] createDataset(int clustering, int setSize, Random rng) {
         BitSet[] dataset = new BitSet[setSize];
 
         for (int i = 0; i < setSize; i++) {
-            dataset[i] = newItem();
+            dataset[i] = newItem(rng);
         }
 
         if (clustering > 0) {
             for (int i = clustering; i < setSize; i++) {
-                BitSet cluster = dataset[RANDOM.nextInt(clustering)];
+                BitSet cluster = dataset[rng.nextInt(clustering)];
                 for (int bit = 0; bit < BIT_LENGTH; bit++) {
-                    if (RANDOM.nextBoolean()) {
+                    if (rng.nextBoolean()) {
                         dataset[i].set(bit, cluster.get(bit));
                     }
                 }
@@ -132,12 +132,20 @@ class ANNSetTest {
         return dataset;
     }
 
-    private static BitSet newItem() {
+    private static BitSet[] createDataset(int clustering, int setSize) {
+        return createDataset(clustering, setSize, RANDOM);
+    }
+
+    private static BitSet newItem(Random rng) {
         BitSet bits = new BitSet(BIT_LENGTH);
         for (int i = 0; i < BIT_LENGTH; i++) {
-            bits.set(i, RANDOM.nextBoolean());
+            bits.set(i, rng.nextBoolean());
         }
         return bits;
+    }
+
+    private static BitSet newItem() {
+        return newItem(RANDOM);
     }
 
     private static BitSet mutatedCopy(BitSet source) {
@@ -187,22 +195,7 @@ class ANNSetTest {
         Random rng = new Random(42);
 
         // Build dataset
-        BitSet[] dataset = new BitSet[SET_SIZE];
-        int clustering = 10;
-        for (int i = 0; i < SET_SIZE; i++) {
-            dataset[i] = new BitSet(BIT_LENGTH);
-            for (int bit = 0; bit < BIT_LENGTH; bit++) {
-                dataset[i].set(bit, rng.nextBoolean());
-            }
-        }
-        for (int i = clustering; i < SET_SIZE; i++) {
-            BitSet cluster = dataset[rng.nextInt(clustering)];
-            for (int bit = 0; bit < BIT_LENGTH; bit++) {
-                if (rng.nextBoolean()) {
-                    dataset[i].set(bit, cluster.get(bit));
-                }
-            }
-        }
+        BitSet[] dataset = createDataset(10, SET_SIZE, rng);
 
         // Environment detection for CPU time / allocation gating
         ThreadMXBean tmx = ManagementFactory.getThreadMXBean();
@@ -263,23 +256,10 @@ class ANNSetTest {
                 annTopK.add(dv.value());
             }
 
-            double bestDist = Double.MAX_VALUE;
-            BitSet trueClosest = null;
-            List<double[]> allDists = new ArrayList<>();
-            for (int j = 0; j < SET_SIZE; j++) {
-                double d = BITSET_DISTANCE_CALC.calcDistance(query, dataset[j]);
-                if (d < bestDist) {
-                    bestDist = d;
-                    trueClosest = dataset[j];
-                }
-                allDists.add(new double[]{j, d});
-            }
-            allDists.sort((a, b) -> Double.compare(a[1], b[1]));
-
-            Set<BitSet> trueTopK = new HashSet<>();
-            for (int j = 0; j < K && j < allDists.size(); j++) {
-                trueTopK.add(dataset[(int) allDists.get(j)[0]]);
-            }
+            List<double[]> allDists = bruteForceDistances(query, dataset);
+            BitSet trueClosest = dataset[(int) allDists.get(0)[0]];
+            double bestDist = allDists.get(0)[1];
+            Set<BitSet> trueTopK = topKFromSorted(allDists, dataset, K);
 
             if (annClosest.equals(trueClosest)) {
                 recall1Hits++;
@@ -512,18 +492,7 @@ class ANNSetTest {
         final int QUERY_COUNT = 100;
 
         Random rng = new Random(7);
-        BitSet[] dataset = new BitSet[SET_SIZE];
-        for (int i = 0; i < SET_SIZE; i++) {
-            dataset[i] = new BitSet(BIT_LENGTH);
-            for (int bit = 0; bit < BIT_LENGTH; bit++) dataset[i].set(bit, rng.nextBoolean());
-        }
-        // Cluster to make the k-NN problem non-trivial
-        for (int i = 10; i < SET_SIZE; i++) {
-            BitSet cluster = dataset[rng.nextInt(10)];
-            for (int bit = 0; bit < BIT_LENGTH; bit++) {
-                if (rng.nextBoolean()) dataset[i].set(bit, cluster.get(bit));
-            }
-        }
+        BitSet[] dataset = createDataset(10, SET_SIZE, rng);
 
         ANNSet<BitSet> set = createConfiguredSet();
         for (BitSet value : dataset) set.add(value);
@@ -535,15 +504,7 @@ class ANNSetTest {
             BitSet query = dataset[rng.nextInt(SET_SIZE)]; // query IS in the index
 
             // Brute-force true top-K
-            List<double[]> allDists = new ArrayList<>();
-            for (int j = 0; j < SET_SIZE; j++) {
-                allDists.add(new double[]{j, BITSET_DISTANCE_CALC.calcDistance(query, dataset[j])});
-            }
-            allDists.sort((a, b) -> Double.compare(a[1], b[1]));
-            Set<BitSet> trueTopK = new HashSet<>();
-            for (int j = 0; j < K && j < allDists.size(); j++) {
-                trueTopK.add(dataset[(int) allDists.get(j)[0]]);
-            }
+            Set<BitSet> trueTopK = topKFromSorted(bruteForceDistances(query, dataset), dataset, K);
 
             // New code: proper ANN search
             ProximityResult<BitSet> result = set.findNeighbors(query, K);
@@ -594,17 +555,7 @@ class ANNSetTest {
         final int QUERY_COUNT = 100;
 
         Random rng = new Random(13);
-        BitSet[] dataset = new BitSet[SET_SIZE];
-        for (int i = 0; i < SET_SIZE; i++) {
-            dataset[i] = new BitSet(BIT_LENGTH);
-            for (int bit = 0; bit < BIT_LENGTH; bit++) dataset[i].set(bit, rng.nextBoolean());
-        }
-        for (int i = 10; i < SET_SIZE; i++) {
-            BitSet cluster = dataset[rng.nextInt(10)];
-            for (int bit = 0; bit < BIT_LENGTH; bit++) {
-                if (rng.nextBoolean()) dataset[i].set(bit, cluster.get(bit));
-            }
-        }
+        BitSet[] dataset = createDataset(10, SET_SIZE, rng);
 
         ANNSet<BitSet> set = createConfiguredSet();
         for (BitSet value : dataset) set.add(value);
@@ -622,18 +573,16 @@ class ANNSetTest {
             if (!removed[i]) remaining.add(dataset[i]);
         }
 
+        BitSet[] remainingArr = remaining.toArray(new BitSet[0]);
+
         int recall1Hits = 0;
         for (int q = 0; q < QUERY_COUNT; q++) {
             BitSet query = (BitSet) remaining.get(rng.nextInt(remaining.size())).clone();
             query.flip(rng.nextInt(BIT_LENGTH));
 
             // Brute-force true nearest among remaining elements
-            double bestDist = Double.MAX_VALUE;
-            BitSet trueNearest = null;
-            for (BitSet item : remaining) {
-                double d = BITSET_DISTANCE_CALC.calcDistance(query, item);
-                if (d < bestDist) { bestDist = d; trueNearest = item; }
-            }
+            List<double[]> dists = bruteForceDistances(query, remainingArr);
+            BitSet trueNearest = remainingArr[(int) dists.get(0)[0]];
 
             BitSet annNearest = set.findNeighbors(query, 1).closest();
             if (annNearest.equals(trueNearest)) recall1Hits++;
@@ -663,6 +612,27 @@ class ANNSetTest {
         } catch (IOException ignored) {
         }
         return null;
+    }
+
+    /**
+     * Returns sorted (ascending by distance) list of [index, distance] pairs for every element
+     * in dataset relative to the query.
+     */
+    private static List<double[]> bruteForceDistances(BitSet query, BitSet[] dataset) {
+        List<double[]> allDists = new ArrayList<>();
+        for (int j = 0; j < dataset.length; j++) {
+            allDists.add(new double[]{j, BITSET_DISTANCE_CALC.calcDistance(query, dataset[j])});
+        }
+        allDists.sort((a, b) -> Double.compare(a[1], b[1]));
+        return allDists;
+    }
+
+    private static Set<BitSet> topKFromSorted(List<double[]> sortedDists, BitSet[] dataset, int k) {
+        Set<BitSet> topK = new HashSet<>();
+        for (int j = 0; j < k && j < sortedDists.size(); j++) {
+            topK.add(dataset[(int) sortedDists.get(j)[0]]);
+        }
+        return topK;
     }
 
 }
