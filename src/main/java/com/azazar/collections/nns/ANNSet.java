@@ -234,6 +234,15 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         return nodes.size();
     }
 
+    /**
+     * Returns the stored graph neighbours and their distances for the given value,
+     * or an empty map if the value is not indexed. Package-private for testing.
+     */
+    Map<X, Double> getStoredNeighbors(X value) {
+        Node<X> node = nodes.get(value);
+        return node == null ? Collections.emptyMap() : Collections.unmodifiableMap(node.neighbors);
+    }
+
     private void indexNode(X value, Node<X> node) {
         nodes.put(value, node);
         nodeIndex.put(value, nodeNodes.size());
@@ -315,10 +324,14 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             for (X otherNeighbor : node.neighbors.keySet()) {
                 if (!otherNeighbor.equals(neighborNode.value)) {
                     Node<X> otherNode = nodes.get(otherNeighbor);
-                    if (otherNode != null && neighborNode.neighbors.size() < neighbourhoodSize) {
+                    // Always consider healing edges regardless of current neighborhood size;
+                    // pruneNeighbors below will decide which edges to keep based on distance.
+                    if (otherNode != null && !neighborNode.neighbors.containsKey(otherNeighbor)) {
                         double dist = distanceCalculator.calcDistance(neighborNode.value, otherNeighbor);
                         neighborNode.neighbors.put(otherNeighbor, dist);
-                        otherNode.neighbors.put(neighborNode.value, dist);
+                        if (!otherNode.neighbors.containsKey(neighborNode.value)) {
+                            otherNode.neighbors.put(neighborNode.value, dist);
+                        }
                     }
                 }
             }
@@ -344,16 +357,22 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         
         Node<X> existing = nodes.get(value);
         if (existing != null) {
-            List<Candidate<X>> nearestCandidates = new ArrayList<>();
-            nearestCandidates.add(new Candidate<>(value, null, 0.0));
-            for (Map.Entry<X, Double> entry : existing.neighbors.entrySet()) {
-                nearestCandidates.add(new Candidate<>(entry.getKey(), null, entry.getValue()));
+            if (count == 1) {
+                return new ProximityResultImpl<>(Collections.singletonList(new Candidate<>(value, null, 0.0)));
             }
-            Collections.sort(nearestCandidates);
-            if (nearestCandidates.size() > count) {
-                nearestCandidates.subList(count, nearestCandidates.size()).clear();
+            // For k>1, do a proper search: stored graph neighbors are chosen for navigability,
+            // not proximity, so they are not necessarily the true k-nearest.
+            List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
+            // Guarantee self is included with distance 0 (the search may not return the query
+            // node itself when ef is small relative to the number of equidistant nodes).
+            boolean selfIncluded = !nearest.isEmpty() && nearest.get(0).distance == 0.0;
+            if (!selfIncluded) {
+                nearest.add(0, new Candidate<>(value, null, 0.0));
+                if (nearest.size() > count) {
+                    nearest.subList(count, nearest.size()).clear();
+                }
             }
-            return new ProximityResultImpl<>(nearestCandidates);
+            return new ProximityResultImpl<>(nearest);
         }
         
         List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
