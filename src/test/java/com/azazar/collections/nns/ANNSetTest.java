@@ -75,27 +75,26 @@ class ANNSetTest {
 
     @Test
     void insertionCostPersistenceTest() {
-        int[] sizes = {1_000, 10_000, 50_000};
-        for (int size : sizes) {
-            BitSet[] dataset = createDataset(10, size);
-            CountingDistanceCalculator<BitSet> calculator = new CountingDistanceCalculator<>(BITSET_DISTANCE_CALC);
-            ANNSet<BitSet> set = createConfiguredSet(calculator);
-            System.out.println("Seeding set with " + size + " elements");
-            int inserted = 0;
-            for (BitSet value : dataset) {
-                Assertions.assertTrue(set.add(value), "Failed to insert seed value #" + inserted);
-                inserted++;
-                if (inserted % 10_000 == 0 || inserted == dataset.length) {
-                    System.out.println("Inserted " + inserted + " / " + dataset.length);
-                }
+        int[] checkpoints = {1_000, 10_000, 50_000};
+        BitSet[] dataset = createDataset(10, checkpoints[checkpoints.length - 1]);
+        CountingDistanceCalculator<BitSet> calculator = new CountingDistanceCalculator<>(BITSET_DISTANCE_CALC);
+        ANNSet<BitSet> set = createConfiguredSet(calculator);
+        int checkIdx = 0;
+        for (int i = 0; i < dataset.length; i++) {
+            Assertions.assertTrue(set.add(dataset[i]), "Failed to insert seed value #" + i);
+            if ((i + 1) % 10_000 == 0) {
+                System.out.println("Inserted " + (i + 1) + " / " + dataset.length);
             }
-            calculator.reset();
-            System.out.println("Performing probe insertion for set size " + size);
-            BitSet probe = mutatedCopy(dataset[size / 2]);
-            Assertions.assertTrue(set.add(probe), "Expected probe insertion for set size " + size);
-            Assertions.assertTrue(calculator.getCallCount() <= 5_000,
-                    () -> "Insertion exceeded distance budget for size " + size + ": " + calculator.getCallCount());
-            System.out.println("Distance calculations for set size " + size + ": " + calculator.getCallCount());
+            if (checkIdx < checkpoints.length && i + 1 == checkpoints[checkIdx]) {
+                int size = checkpoints[checkIdx++];
+                calculator.reset();
+                BitSet probe = mutatedCopy(dataset[size / 2]);
+                Assertions.assertTrue(set.add(probe), "Expected probe insertion for set size " + size);
+                Assertions.assertTrue(calculator.getCallCount() <= 5_000,
+                        () -> "Insertion exceeded distance budget for size " + size + ": " + calculator.getCallCount());
+                System.out.println("Distance calculations for set size " + size + ": " + calculator.getCallCount());
+                set.remove(probe);
+            }
         }
     }
 
