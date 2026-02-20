@@ -356,13 +356,15 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
         }
         
         Node<X> existing = nodes.get(value);
+        if (existing != null && count == 1) {
+            return new ProximityResultImpl<>(Collections.singletonList(new Candidate<>(value, null, 0.0)));
+        }
+        
+        // For non-indexed nodes, or k>1 on indexed nodes, a proper search is needed: stored graph
+        // neighbors are chosen for navigability, not proximity, so they are not necessarily the true k-nearest.
+        List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
+        
         if (existing != null) {
-            if (count == 1) {
-                return new ProximityResultImpl<>(Collections.singletonList(new Candidate<>(value, null, 0.0)));
-            }
-            // For k>1, do a proper search: stored graph neighbors are chosen for navigability,
-            // not proximity, so they are not necessarily the true k-nearest.
-            List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
             // Guarantee self is included with distance 0 (the search may not return the query
             // node itself when ef is small relative to the number of equidistant nodes).
             boolean selfIncluded = !nearest.isEmpty() && nearest.get(0).distance == 0.0;
@@ -372,10 +374,8 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
                     nearest.subList(count, nearest.size()).clear();
                 }
             }
-            return new ProximityResultImpl<>(nearest);
         }
         
-        List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
         return new ProximityResultImpl<>(nearest);
     }
 
