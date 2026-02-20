@@ -360,8 +360,8 @@ public class ANNSet<X> implements DistanceBasedSet<X>, Serializable {
             return new ProximityResultImpl<>(Collections.singletonList(new Candidate<>(value, null, 0.0)));
         }
         
-        // For k>1 on indexed nodes, a proper search is needed: stored graph neighbors are
-        // chosen for navigability, not proximity, so they are not necessarily the true k-nearest.
+        // For non-indexed nodes, or k>1 on indexed nodes, a proper search is needed: stored graph
+        // neighbors are chosen for navigability, not proximity, so they are not necessarily the true k-nearest.
         List<Candidate<X>> nearest = searchKNearest(value, count, (int) (searchSetSize * adaptiveStepFactor));
         
         if (existing != null) {
