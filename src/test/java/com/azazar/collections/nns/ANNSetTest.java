@@ -503,8 +503,7 @@ class ANNSetTest {
      * neighbours (self at distance 0, plus direct graph edges sorted by stored distance).
      * Graph neighbours are selected by RNG pruning for navigability (directional diversity),
      * not proximity. This test replicates the old logic using {@code getStoredNeighbors},
-     * measures recall@K for both paths, and prints both numbers.
-     * Measured: old = 0.813, new = 0.952 on a 1000-item clustered dataset.</p>
+     * measures recall@K for both paths, and prints both numbers.</p>
      */
     @Test
     void indexedNodeKnnAccuracyTest() {
@@ -645,7 +644,6 @@ class ANNSetTest {
                 + " removals = " + recall1 + " (" + recall1Hits + "/" + QUERY_COUNT + ")");
 
         // The old code skipped healing full neighborhoods, leaving graph holes after removal.
-        // That pushed recall@1 below 0.80 on this workload. The fix keeps it above 0.85.
         Assertions.assertTrue(recall1 >= 0.85,
                 "recall@1 after bulk removes should be >= 0.85, got " + recall1);
     }
